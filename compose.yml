@@ -1,0 +1,58 @@
+services:
+  pdns:
+    build: ./pdns
+    container_name: pdns-server
+    env_file:
+      - .env
+    environment:
+      PDNS_pgsql_host: ${PDNS_PGSQL_HOST}
+      PDNS_pgsql_user: ${PDNS_PGSQL_USER}
+      PDNS_pgsql_password_file: /run/secrets/pgsql_password
+      PDNS_pgsql_dbname: ${PDNS_PGSQL_DBNAME}
+      PDNS_api_key_file: /run/secrets/pdns_api_key
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "8081:8081"
+    depends_on:
+      - db
+    secrets:
+      - postgres_password
+      - pdns_api_key
+
+  db:
+    build: ./db
+    container_name: pdns-db
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${PDNS_PGSQL_DBNAME}
+      POSTGRES_USER: ${PDNS_PGSQL_USER}
+      POSTGRES_PASSWORD_FILE: /run/secrets/pgsql_password
+    ports:
+      - "5432:5432"
+    secrets:
+      - postgres_password
+
+  pdns-admin:
+    build: ./pdns-admin
+    container_name: pdns-admin
+    env_file:
+      - .env
+    environment:
+      GUNICORN_THREADS: 1
+      PDNS_API_KEY_FILE: /run/secrets/pdns_api_key
+    ports:
+      - "9191:${PDNS_ADMIN_PORT}"
+    depends_on:
+      - db
+    volumes:
+      - ./pdns-admin/config.py:/opt/webapp/config.py
+    secrets:
+      - pdns_api_key 
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.key
+  pdns_api_key:
+    file: ./secrets/pdns_api_key.key

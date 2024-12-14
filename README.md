@@ -3,6 +3,7 @@
 This repository contains all the necessary files to set up a PowerDNS server with a PostgreSQL backend and PowerDNS Admin panel using Docker.
 
 ## Repository Structure
+```
 powerdns-server/
 │
 ├── .env
@@ -19,6 +20,7 @@ powerdns-server/
 └── db/
     ├── Dockerfile
     └── init.sql
+```
 
 ## Prerequisites
 - Docker and Docker Compose installed on your machine.

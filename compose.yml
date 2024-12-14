@@ -1,6 +1,8 @@
 services:
   pdns:
-    build: ./pdns
+    build:
+      context: ./pdns
+      dockerfile: dockerfile
     container_name: pdns-server
     env_file:
       - .env
@@ -21,7 +23,9 @@ services:
       - pdns_api_key
 
   db:
-    build: ./db
+    build:
+      context: ./db
+      dockerfile: dockerfile
     container_name: pdns-db
     env_file:
       - .env
@@ -35,7 +39,9 @@ services:
       - postgres_password
 
   pdns-admin:
-    build: ./pdns-admin
+    build:
+      context: ./pdns-admin
+      dockerfile: dockerfile
     container_name: pdns-admin
     env_file:
       - .env

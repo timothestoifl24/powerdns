@@ -10,6 +10,8 @@ WORKDIR /opt/webapp
 
 COPY requirements.txt /opt/webapp/requirements.txt
 
+RUN pip install gunicorn
+
 COPY config.py /opt/webapp/
 
 CMD ["gunicorn", "--config", "gunicorn_config.py", "app:create_app()"]

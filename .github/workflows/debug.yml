@@ -1,0 +1,15 @@
+name: Manual Clone Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  clone:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Clone PowerDNS-Admin
+        run: git clone https://github.com/PowerDNS-Admin/PowerDNS-Admin.git

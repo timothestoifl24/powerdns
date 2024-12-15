@@ -4,7 +4,7 @@ RUN apt-get update && \
     apt-get install -y git && \
     pip install --upgrade pip
 
-RUN git clone https://github.com/ngoduykhanh/PowerDNS-Admin.git /opt/webapp && \
+RUN git clone https://github.com/PowerDNS-Admin/PowerDNS-Admin.git /opt/webapp && \
     cd /opt/webapp && \
     pip install -r requirements.txt
 

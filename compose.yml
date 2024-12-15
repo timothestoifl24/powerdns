@@ -1,8 +1,6 @@
 services:
   pdns:
-    build:
-      context: ./pdns
-      dockerfile: dockerfile
+    image: ghcr.io/timothestoifl24/pdns:latest
     container_name: pdns-server
     env_file:
       - .env
@@ -23,9 +21,7 @@ services:
       - pdns_api_key
 
   db:
-    build:
-      context: ./db
-      dockerfile: dockerfile
+    image: ghcr.io/timothestoifl24/pdns-db:latest
     container_name: pdns-db
     env_file:
       - .env
@@ -39,9 +35,7 @@ services:
       - postgres_password
 
   pdns-admin:
-    build:
-      context: ./pdns-admin
-      dockerfile: dockerfile
+    image: ghcr.io/timothestoifl24/pdns-admin:latest
     container_name: pdns-admin
     env_file:
       - .env
@@ -49,16 +43,17 @@ services:
       GUNICORN_THREADS: 1
       PDNS_API_KEY_FILE: /run/secrets/pdns_api_key
     ports:
-      - "9191:${PDNS_ADMIN_PORT}"
+      - "9191:80"
     depends_on:
       - db
     volumes:
       - ./pdns-admin/config.py:/opt/webapp/config.py
     secrets:
-      - pdns_api_key 
+      - pdns_api_key
 
 secrets:
   postgres_password:
     file: ./secrets/postgres_password.key
   pdns_api_key:
     file: ./secrets/pdns_api_key.key
+    

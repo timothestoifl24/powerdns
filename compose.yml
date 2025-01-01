@@ -2,6 +2,7 @@ services:
   pdns:
     image: ghcr.io/timothestoifl24/pdns:latest
     container_name: pdns-server
+    restart: unless-stopped
     env_file:
       - .env
     environment:
@@ -23,6 +24,7 @@ services:
   db:
     image: ghcr.io/timothestoifl24/pdns-db:latest
     container_name: pdns-db
+    restart: unless-stopped
     env_file:
       - .env
     environment:
@@ -37,6 +39,7 @@ services:
   pdns-admin:
     image: ghcr.io/timothestoifl24/pdns-admin:latest
     container_name: pdns-admin
+    restart: unless-stopped
     env_file:
       - .env
     environment:
@@ -52,8 +55,8 @@ services:
       - pdns_api_key
 
 secrets:
-  postgres_password:
-    file: ./secrets/postgres_password.key
+  pgsql_password:
+    file: ./secrets/pgsql_password.key
   pdns_api_key:
     file: ./secrets/pdns_api_key.key
     

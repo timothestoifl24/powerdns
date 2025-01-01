@@ -34,7 +34,7 @@ RUN pip install --upgrade pip && \
     pip install --use-pep517 -r requirements.txt
 
 # Add sources
-COPY ./git-submodule/PowerDNS-Admin /build
+COPY ./git-submodule_PowerDNS-Admin /build
 
 # Prepare assets
 RUN yarn install --pure-lockfile --production && \

@@ -18,7 +18,7 @@ services:
     depends_on:
       - db
     secrets:
-      - postgres_password
+      - pgsql_password
       - pdns_api_key
 
   db:
@@ -34,7 +34,7 @@ services:
     ports:
       - "5432:5432"
     secrets:
-      - postgres_password
+      - pgsql_password
 
   pdns-admin:
     image: ghcr.io/timothestoifl24/pdns-admin:latest

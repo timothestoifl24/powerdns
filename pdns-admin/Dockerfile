@@ -34,7 +34,7 @@ RUN git submodule init && git submodule update
 WORKDIR /build
 
 # Add sources
-COPY ./pdns-admin/git-submodule_PowerDNS-Admin /build
+COPY /prebuild/pdns-admin/git-submodule_PowerDNS-Admin /build
 
 # We copy just the requirements.txt first to leverage Docker cache
 COPY ./pdns-admin/requirements.txt /build/requirements.txt

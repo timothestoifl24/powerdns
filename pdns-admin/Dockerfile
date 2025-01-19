@@ -33,6 +33,9 @@ COPY ./requirements.txt /build/requirements.txt
 RUN pip install --upgrade pip && \
     pip install --use-pep517 -r requirements.txt
 
+# Initialize and update git submodule
+RUN git submodule init && git submodule update
+
 # Add sources
 COPY ./git-submodule_PowerDNS-Admin /build
 

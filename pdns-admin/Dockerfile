@@ -33,7 +33,8 @@ RUN git submodule init && git submodule update
 
 # Move Submodule into Build
 RUN mkdir /bild && \
-    mv /prebuild/pdns-admin/git-submodule_PowerDNS-Admin /build
+    mv /prebuild/pdns-admin/git-submodule_PowerDNS-Admin /build && \
+    ls -la /build
 
 WORKDIR /build
 

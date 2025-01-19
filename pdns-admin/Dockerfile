@@ -24,7 +24,7 @@ ENV LC_ALL=en_US.UTF-8 \
 RUN apk add --no-cache ${BUILD_DEPENDENCIES} && \
     apk add --no-cache py3-pip git
 
-# Add sources
+# Add PreBuild fr Git Submodule
 WORKDIR /prebuild
 COPY . /prebuild
 
@@ -33,8 +33,8 @@ RUN git submodule init && git submodule update
 
 WORKDIR /build
 
-# Add sources
-COPY /prebuild/pdns-admin/git-submodule_PowerDNS-Admin /build
+# MOve Submodule into Build
+RUN mv /prebuild/pdns-admin/git-submodule_PowerDNS-Admin /build
 
 # We copy just the requirements.txt first to leverage Docker cache
 COPY ./pdns-admin/requirements.txt /build/requirements.txt

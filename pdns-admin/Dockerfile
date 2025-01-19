@@ -26,21 +26,18 @@ RUN apk add --no-cache ${BUILD_DEPENDENCIES} && \
 
 WORKDIR /build
 
-# Copy the .git directory
-COPY ./.gitmodules /build/.gitmodules
+# Initialize and update git submodule
+RUN git submodule init && git submodule update
+
+# Add sources
+COPY ./pdns-admin/git-submodule_PowerDNS-Admin /build
 
 # We copy just the requirements.txt first to leverage Docker cache
-COPY ./requirements.txt /build/requirements.txt
+COPY ./pdns-admin/requirements.txt /build/requirements.txt
 
 # Get application dependencies
 RUN pip install --upgrade pip && \
     pip install --use-pep517 -r requirements.txt
-
-# Initialize and update git submodule
-RUN git submodule update
-
-# Add sources
-COPY ./git-submodule_PowerDNS-Admin /build
 
 # Prepare assets
 RUN yarn install --pure-lockfile --production && \
@@ -90,11 +87,11 @@ RUN apk add --no-cache mariadb-connector-c postgresql-client py3-gunicorn py3-py
 COPY --from=builder /usr/bin/flask /usr/bin/
 COPY --from=builder /usr/lib/python3.10/site-packages /usr/lib/python3.10/site-packages/
 COPY --from=builder --chown=root:${USER} /app /app/
-COPY entrypoint.sh /usr/bin/
+COPY ./pdns-admin/entrypoint.sh /usr/bin/
 
 WORKDIR /app
-RUN chown ${USER}:${USER} ./git-submodule_PowerDNS-Admin/configs /app && \
-    cat ./git-submodule_PowerDNS-Admin/powerdnsadmin/default_config.py ./git-submodule_PowerDNS-Admin/configs/docker_config.py > ./git-submodule_PowerDNS-Admin/powerdnsadmin/docker_config.py
+RUN chown ${USER}:${USER} ./pdns-admin/git-submodule_PowerDNS-Admin/configs /app && \
+    cat ./pdns-admin/git-submodule_PowerDNS-Admin/powerdnsadmin/default_config.py ./pdns-admin/git-submodule_PowerDNS-Admin/configs/docker_config.py > ./pdns-admin/git-submodule_PowerDNS-Admin/powerdnsadmin/docker_config.py
 
 EXPOSE 80/tcp
 USER ${USER}

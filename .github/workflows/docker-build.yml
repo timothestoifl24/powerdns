@@ -45,7 +45,7 @@ jobs:
       - name: Build and push pdns-admin image
         uses: docker/build-push-action@v2
         with:
-          context: ./pdns-admin
+          context: .
           file: ./pdns-admin/Dockerfile
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/pdns-admin:latest

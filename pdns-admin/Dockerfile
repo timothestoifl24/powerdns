@@ -95,8 +95,8 @@ COPY --from=builder --chown=root:${USER} /app /app/
 COPY ./pdns-admin/entrypoint.sh /usr/bin/
 
 WORKDIR /app
-RUN chown ${USER}:${USER} ./pdns-admin/git-submodule_PowerDNS-Admin/configs /app && \
-    cat ./pdns-admin/git-submodule_PowerDNS-Admin/powerdnsadmin/default_config.py ./pdns-admin/git-submodule_PowerDNS-Admin/configs/docker_config.py > ./pdns-admin/git-submodule_PowerDNS-Admin/powerdnsadmin/docker_config.py
+RUN chown ${USER}:${USER} ./configs /app && \
+    cat ./powerdnsadmin/default_config.py ./configs/docker_config.py > ./powerdnsadmin/docker_config.py
 
 EXPOSE 80/tcp
 USER ${USER}

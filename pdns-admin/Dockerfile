@@ -22,7 +22,7 @@ ENV LC_ALL=en_US.UTF-8 \
 # them with "apk del" at the end of build stage, the python requests module
 # will be removed as well - (Tested with alpine:3.12 and python 3.8.5).
 RUN apk add --no-cache ${BUILD_DEPENDENCIES} && \
-    apk add --no-cache py3-pip
+    apk add --no-cache py3-pip git
 
 WORKDIR /build
 

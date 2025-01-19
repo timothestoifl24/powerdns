@@ -37,14 +37,8 @@ RUN mkdir /bild && \
 
 WORKDIR /build
 
-#DEBUG
-RUN ls -la
-
 # We copy just the requirements.txt first to leverage Docker cache
 COPY ./pdns-admin/requirements.txt /build/requirements.txt
-
-#Debug
-RUN ls -la
 
 # Get application dependencies
 RUN pip install --upgrade pip && \

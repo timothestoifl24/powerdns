@@ -33,13 +33,18 @@ RUN git submodule init && git submodule update
 
 # Move Submodule into Build
 RUN mkdir /bild && \
-    mv /prebuild/pdns-admin/git-submodule_PowerDNS-Admin /build && \
-    ls -la /build
+    mv /prebuild/pdns-admin/git-submodule_PowerDNS-Admin /build
 
 WORKDIR /build
 
+#DEBUG
+RUN ls -la
+
 # We copy just the requirements.txt first to leverage Docker cache
 COPY ./pdns-admin/requirements.txt /build/requirements.txt
+
+#Debug
+RUN ls -la
 
 # Get application dependencies
 RUN pip install --upgrade pip && \

@@ -24,10 +24,14 @@ ENV LC_ALL=en_US.UTF-8 \
 RUN apk add --no-cache ${BUILD_DEPENDENCIES} && \
     apk add --no-cache py3-pip git
 
-WORKDIR /build
+# Add sources
+WORKDIR /prebuild
+COPY . /prebuild
 
 # Initialize and update git submodule
 RUN git submodule init && git submodule update
+
+WORKDIR /build
 
 # Add sources
 COPY ./pdns-admin/git-submodule_PowerDNS-Admin /build

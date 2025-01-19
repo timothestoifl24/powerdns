@@ -31,10 +31,11 @@ COPY . /prebuild
 # Initialize and update git submodule
 RUN git submodule init && git submodule update
 
-WORKDIR /build
+# Move Submodule into Build
+RUN mkdir /bild && \
+    mv /prebuild/pdns-admin/git-submodule_PowerDNS-Admin /build
 
-# MOve Submodule into Build
-RUN mv /prebuild/pdns-admin/git-submodule_PowerDNS-Admin /build
+WORKDIR /build
 
 # We copy just the requirements.txt first to leverage Docker cache
 COPY ./pdns-admin/requirements.txt /build/requirements.txt

@@ -92,7 +92,7 @@ RUN apk add --no-cache mariadb-connector-c postgresql-client py3-gunicorn py3-py
 COPY --from=builder /usr/bin/flask /usr/bin/
 COPY --from=builder /usr/lib/python3.10/site-packages /usr/lib/python3.10/site-packages/
 COPY --from=builder --chown=root:${USER} /app /app/
-COPY ./powerdnsadmin/docker/entrypoint.sh /usr/bin/
+COPY /build/powerdnsadmin/docker/entrypoint.sh /usr/bin/
 
 WORKDIR /app
 RUN chown ${USER}:${USER} ./configs /app && \

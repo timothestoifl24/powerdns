@@ -26,6 +26,9 @@ RUN apk add --no-cache ${BUILD_DEPENDENCIES} && \
 
 WORKDIR /build
 
+# Copy the .git directory
+COPY /.git /build/.git
+
 # We copy just the requirements.txt first to leverage Docker cache
 COPY ./requirements.txt /build/requirements.txt
 

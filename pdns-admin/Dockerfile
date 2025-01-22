@@ -48,6 +48,8 @@ RUN yarn install --pure-lockfile --production && \
     sed -i -r -e "s|'rcssmin',\s?'cssrewrite'|'rcssmin'|g" /build/powerdnsadmin/assets.py && \
     flask assets build
 
+RUN ls -la /build/
+
 RUN mv /build/powerdnsadmin/static /tmp/static && \
     mkdir /build/powerdnsadmin/static && \
     cp -r /tmp/static/generated /build/powerdnsadmin/static && \

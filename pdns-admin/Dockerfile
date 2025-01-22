@@ -42,12 +42,6 @@ WORKDIR /build
 RUN pip install --upgrade pip && \
     pip install --use-pep517 -r requirements.txt
 
-RUN rm -rf /prebuild
-
-RUN ls -la /build/
-
-RUN ls -la /build/powerdnsadmin/
-
 # Prepare assets
 RUN yarn install --pure-lockfile --production && \
     yarn cache clean && \

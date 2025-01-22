@@ -37,12 +37,17 @@ services:
       - pgsql_password
 
   pdns-admin:
-    image: ghcr.io/timothestoifl24/pdns-admin:latest
+    image: powerdnsadmin/pda-legacy:latest
     container_name: pdns-admin
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
     env_file:
       - .env
     environment:
+      SQLALCHEMY_DATABASE_URI: mysql://${PDNS_PGSQL_USER}:${PDNS_pgsql_password_file}@db
       PDNS_API_KEY_FILE: /run/secrets/pdns_api_key
     ports:
       - "9191:80"

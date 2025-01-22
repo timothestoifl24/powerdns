@@ -1,3 +1,0 @@
-[submodule "pdns-admin/git-submodule_PowerDNS-Admin"]
-	path = pdns-admin/git-submodule_PowerDNS-Admin
-	url = https://github.com/PowerDNS-Admin/PowerDNS-Admin.git

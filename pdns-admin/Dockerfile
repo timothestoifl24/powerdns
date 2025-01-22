@@ -73,6 +73,9 @@ RUN mkdir -p /app && \
     mkdir -p /app/configs && \
     cp -r /build/configs/docker_config.py /app/configs
 
+# Delete dependencies
+RUN apk py3-pip git
+
 # Build image
 FROM alpine:3.17
 
@@ -85,7 +88,7 @@ RUN apk add --no-cache mariadb-connector-c postgresql-client py3-gunicorn py3-py
     mkdir /data && \
     chown ${USER}:${USER} /data && \
     setcap cap_net_bind_service=+ep $(readlink -f /usr/bin/python3) && \
-    apk del libcap git py3-pip
+    apk del libcap
 
 COPY --from=builder /usr/bin/flask /usr/bin/
 COPY --from=builder /usr/lib/python3.10/site-packages /usr/lib/python3.10/site-packages/

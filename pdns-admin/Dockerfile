@@ -48,14 +48,17 @@ RUN yarn install --pure-lockfile --production && \
     sed -i -r -e "s|'rcssmin',\s?'cssrewrite'|'rcssmin'|g" /build/powerdnsadmin/assets.py && \
     flask assets build
 
-RUN ls -la /build/
-
 RUN mv /build/powerdnsadmin/static /tmp/static && \
     mkdir /build/powerdnsadmin/static && \
     cp -r /tmp/static/generated /build/powerdnsadmin/static && \
     cp -r /tmp/static/assets /build/powerdnsadmin/static && \
-    cp -r /tmp/static/img /build/powerdnsadmin/static && \
-    find /tmp/static/node_modules -name 'webfonts' -exec cp -r {} /build/powerdnsadmin/static \; && \
+    cp -r /tmp/static/img /build/powerdnsadmin/static
+
+RUN ls -la /build/
+
+RUN ls -la /tmp/static/
+
+RUN find /tmp/static/node_modules -name 'webfonts' -exec cp -r {} /build/powerdnsadmin/static \; && \
     find /tmp/static/node_modules -name 'fonts' -exec cp -r {} /build/powerdnsadmin/static \; && \
     find /tmp/static/node_modules/icheck/skins/square -name '*.png' -exec cp {} /build/powerdnsadmin/static/generated \;
 

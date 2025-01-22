@@ -33,8 +33,8 @@ RUN git submodule init && git submodule update
 
 # Move Submodule into Build
 RUN mkdir /build && \
-    mv /prebuild/pdns-admin/git-submodule_PowerDNS-Admin /build && \
-    mv /prebuild/pdns-admin/requirements.txt /build/requirements.txt
+    mv /prebuild/pdns-admin/git-submodule_PowerDNS-Admin/* /build/ && \
+    mv -f /prebuild/pdns-admin/requirements.txt /build/requirements.txt
 
 WORKDIR /build
 
@@ -42,9 +42,7 @@ WORKDIR /build
 RUN pip install --upgrade pip && \
     pip install --use-pep517 -r requirements.txt
 
-RUN ls -la
-
-RUN ls -la /
+RUN rm -rf /prebuild
 
 RUN ls -la /build/
 
@@ -93,7 +91,7 @@ RUN apk add --no-cache mariadb-connector-c postgresql-client py3-gunicorn py3-py
     mkdir /data && \
     chown ${USER}:${USER} /data && \
     setcap cap_net_bind_service=+ep $(readlink -f /usr/bin/python3) && \
-    apk del libcap
+    apk del libcap git py3-pip
 
 COPY --from=builder /usr/bin/flask /usr/bin/
 COPY --from=builder /usr/lib/python3.10/site-packages /usr/lib/python3.10/site-packages/

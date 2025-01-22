@@ -32,13 +32,11 @@ COPY . /prebuild
 RUN git submodule init && git submodule update
 
 # Move Submodule into Build
-RUN mkdir /bild && \
-    mv /prebuild/pdns-admin/git-submodule_PowerDNS-Admin /build
+RUN mkdir /build && \
+    mv /prebuild/pdns-admin/git-submodule_PowerDNS-Admin /build && \
+    mv /prebuild/pdns-admin/requirements.txt /build/requirements.txt
 
 WORKDIR /build
-
-# We copy just the requirements.txt first to leverage Docker cache
-COPY ./pdns-admin/requirements.txt /build/requirements.txt
 
 # Get application dependencies
 RUN pip install --upgrade pip && \
@@ -92,7 +90,7 @@ RUN apk add --no-cache mariadb-connector-c postgresql-client py3-gunicorn py3-py
 COPY --from=builder /usr/bin/flask /usr/bin/
 COPY --from=builder /usr/lib/python3.10/site-packages /usr/lib/python3.10/site-packages/
 COPY --from=builder --chown=root:${USER} /app /app/
-COPY /build/powerdnsadmin/docker/entrypoint.sh /usr/bin/
+COPY --from=builder /build/docker/entrypoint.sh /usr/bin/
 
 WORKDIR /app
 RUN chown ${USER}:${USER} ./configs /app && \

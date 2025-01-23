@@ -6,11 +6,11 @@ services:
     env_file:
       - .env
     environment:
-      PDNS_PGSQL_HOST: ${PDNS_PGSQL_HOST}
-      PDNS_PGSQL_USER: ${PDNS_PGSQL_USER}
-      PDNS_PGSQL_PASSWORD_FILE: /run/secrets/pgsql_password
-      PDNS_PGSQL_DBNAME: ${PDNS_PGSQL_DBNAME}
-      PDNS_API_KEY_FILE: /run/secrets/pdns_api_key
+      - PDNS_PGSQL_HOST: ${PDNS_PGSQL_HOST}
+      - PDNS_PGSQL_USER: ${PDNS_PGSQL_USER}
+      - PDNS_PGSQL_PASSWORD_FILE: /run/secrets/pgsql_password
+      - PDNS_PGSQL_DBNAME: ${PDNS_PGSQL_DBNAME}
+      - PDNS_API_KEY_FILE: /run/secrets/pdns_api_key
     ports:
       - "53:53/tcp"
       - "53:53/udp"
@@ -28,9 +28,9 @@ services:
     env_file:
       - .env
     environment:
-      POSTGRES_DB: ${PDNS_PGSQL_DBNAME}
-      POSTGRES_USER: ${PDNS_PGSQL_USER}
-      POSTGRES_PASSWORD_FILE: /run/secrets/pgsql_password
+      - POSTGRES_DB: ${PDNS_PGSQL_DBNAME}
+      - POSTGRES_USER: ${PDNS_PGSQL_USER}
+      - POSTGRES_PASSWORD_FILE: /run/secrets/pgsql_password
     ports:
       - "5432:5432"
     secrets:
@@ -47,8 +47,8 @@ services:
     env_file:
       - .env
     environment:
-      SQLALCHEMY_DATABASE_URI: mysql://${PDNS_PGSQL_USER}:${PDNS_pgsql_password_file}@db
-      PDNS_API_KEY_FILE: /run/secrets/pdns_api_key
+      - SQLALCHEMY_DATABASE_URI: mysql://${PDNS_PGSQL_USER}:${PDNS_pgsql_password_file}@db
+      - PDNS_API_KEY_FILE: /run/secrets/pdns_api_key
     ports:
       - "9191:80"
     depends_on:

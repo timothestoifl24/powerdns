@@ -6,11 +6,11 @@ services:
     env_file:
       - .env
     environment:
-      PDNS_pgsql_host: ${PDNS_PGSQL_HOST}
-      PDNS_pgsql_user: ${PDNS_PGSQL_USER}
-      PDNS_pgsql_password_FILE: /run/secrets/pgsql_password
-      PDNS_pgsql_dbname: ${PDNS_PGSQL_DBNAME}
-      PDNS_api_key_file: /run/secrets/pdns_api_key
+      PDNS_PGSQL_HOST: ${PDNS_PGSQL_HOST}
+      PDNS_PGSQL_USER: ${PDNS_PGSQL_USER}
+      PDNS_PGSQL_PASSWORD_FILE: /run/secrets/pgsql_password
+      PDNS_PGSQL_DBNAME: ${PDNS_PGSQL_DBNAME}
+      PDNS_API_KEY_FILE: /run/secrets/pdns_api_key
     ports:
       - "53:53/tcp"
       - "53:53/udp"

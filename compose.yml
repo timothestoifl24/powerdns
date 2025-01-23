@@ -8,7 +8,7 @@ services:
     environment:
       PDNS_pgsql_host: ${PDNS_PGSQL_HOST}
       PDNS_pgsql_user: ${PDNS_PGSQL_USER}
-      PDNS_pgsql_password_file: /run/secrets/pgsql_password
+      PDNS_pgsql_password_FILE: /run/secrets/pgsql_password
       PDNS_pgsql_dbname: ${PDNS_PGSQL_DBNAME}
       PDNS_api_key_file: /run/secrets/pdns_api_key
     ports:

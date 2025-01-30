@@ -1,24 +1,19 @@
 # PowerDNS Setup with PostgreSQL and PowerDNS-Admin
 
-This repository contains all the necessary files to set up a PowerDNS server with a PostgreSQL backend and PowerDNS Admin panel using Docker.
+## Description
+This setup creates a containerized PowerDNS environment with MariaDB as the backend.
 
 ## Repository Structure
 ```
-powerdns-server/
-│
-├── .env
-├── docker-compose.yml
-├── pdns/
-│   ├── Dockerfile
-│   ├── pdns.conf
-│   └── entrypoint.sh
-│
-├── pdns-admin/
-│   ├── Dockerfile
-│   └── config.py
-│
+powerdns/
+│── docker-compose.yml
+│── Dockerfile
+│── pdns.conf
+│── entrypoint.sh
+│── schema.sql
+│── .env
+│── README.md
 └── db/
-    ├── Dockerfile
     └── init.sql
 ```
 
@@ -26,24 +21,19 @@ powerdns-server/
 - Docker and Docker Compose installed on your machine.
 - Docker secrets created for PostgreSQL password and PowerDNS API key.
 
-## Docker Compose Configuration
-The docker-compose.yml file defines the services and configuration for the PowerDNS server, PostgreSQL database, and PowerDNS Admin panel. Ensure the following services are defined:
-- pdns: PowerDNS server with PostgreSQL backend.
-- db: PostgreSQL database service.
-- pdns-admin: PowerDNS Admin panel service.
 
-##Building and Running the Containers
-To build and run the containers, navigate to the repository directory and run:
-```bash
-    docker-compose up -d
-```
-This command will build the Docker images and start the containers in detached mode.
-
-## Configuration Files
-### pdns/pdns.conf
-This file contains the configuration for the PowerDNS server.
-### pdns-admin/config.py
-This file contains the configuration for the PowerDNS Admin panel.
+## Installation
+1. Create the secrets:
+   ```sh
+   mkdir -p secrets
+   echo "changeme" > secrets/mysql_root_password.txt
+   echo "changeme" > secrets/mysql_password.txt
+   ```
+2. Start the environment:
+   ```sh
+   docker-compose up -d
+   ```
+3. Access the web interface at `http://localhost:8081`
 
 ## Cleanup
 To stop and remove the containers, network, and volumes, run:

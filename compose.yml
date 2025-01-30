@@ -48,6 +48,7 @@ services:
       - .env
     environment:
       - SQLALCHEMY_DATABASE_URI: "mysql://${PDNS_PGSQL_USER}:${PDNS_pgsql_password_file}@db"
+      - PDNS_pgsql_password_file: /run/secrets/pgsql_password
       - PDNS_API_KEY_FILE: /run/secrets/pdns_api_key
     ports:
       - "9191:80"
@@ -57,6 +58,7 @@ services:
       - ./pdns-admin/config.py:/opt/webapp/config.py
     secrets:
       - pdns_api_key
+      - pgsql_password
 
 secrets:
   pgsql_password:

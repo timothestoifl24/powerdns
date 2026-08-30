@@ -25,6 +25,8 @@ concurrency:
 jobs:
   build:
     name: Build the site
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -32,7 +34,7 @@ jobs:
           # VitePress reads the git history for each page's "last updated".
           fetch-depth: 0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm

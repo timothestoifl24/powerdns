@@ -11,6 +11,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege for every job. Without this the GITHUB_TOKEN gets whatever
+# the repository default is, which for older repositories is read/write on
+# everything -- so a compromised action or dependency could push commits or
+# publish packages. The publish job re-declares what it actually needs
+# (packages: write); a job-level block overrides this one.
+permissions:
+  contents: read
+
 env:
   REGISTRY: ghcr.io
 
@@ -19,9 +27,9 @@ jobs:
     name: Unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
           cache: pip
@@ -50,12 +58,20 @@ jobs:
     name: Shell scripts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: ShellCheck
         run: |
+          set -euo pipefail
           sudo apt-get update && sudo apt-get install -y shellcheck
-          shellcheck pdns/entrypoint.sh webui/entrypoint.sh \
-                     scripts/generate-secrets.sh db/initdb/02-admin-schema.sh
+          # Discovered rather than listed: a hardcoded list silently goes stale
+          # when a script is renamed, and fails the build when one is removed.
+          mapfile -t scripts < <(git ls-files '*.sh')
+          if [ "${#scripts[@]}" -eq 0 ]; then
+            echo "no shell scripts found -- the glob is wrong" >&2
+            exit 1
+          fi
+          printf 'checking %s\n' "${scripts[@]}"
+          shellcheck "${scripts[@]}"
 
   smoke:
     name: End-to-end compose smoke test
@@ -65,7 +81,7 @@ jobs:
       # still runs the real compose.yml.
       COMPOSE_FILE: compose.yml:compose.ci.yml
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Generate secrets and .env
         run: |
@@ -116,7 +132,7 @@ jobs:
           set -euo pipefail
           # An empty list is the correct answer; an error means the schema or
           # the database credentials are wrong.
-          docker compose exec -T db psql -U pdns -d pdns -c '\dt' | tee /tmp/tables.txt
+          docker compose exec -T db psql -U postgres -d pdns -c '\dt' | tee /tmp/tables.txt
           for table in domains records cryptokeys domainmetadata tsigkeys comments supermasters; do
             grep -q " $table " /tmp/tables.txt || { echo "missing table: $table" >&2; exit 1; }
           done
@@ -124,12 +140,50 @@ jobs:
       - name: The admin panel's schema is separate from PowerDNS's
         run: |
           set -euo pipefail
-          docker compose exec -T db psql -U pdns -d pdns -c \
+          docker compose exec -T db psql -U postgres -d pdns -c \
             "SELECT tablename FROM pg_tables WHERE schemaname='pdnsadmin' ORDER BY 1" \
             | tee /tmp/admin_tables.txt
           for table in users zone_access audit_log app_settings; do
             grep -q "$table" /tmp/admin_tables.txt || { echo "missing table: $table" >&2; exit 1; }
           done
+
+      - name: Neither application role is a superuser
+        run: |
+          set -euo pipefail
+          # The whole point of the separate bootstrap role: if either of these
+          # comes back as a superuser, the privilege separation below is
+          # decorative.
+          for role in pdns pdnsadmin; do
+            super=$(docker compose exec -T db psql -U postgres -d pdns -tAc \
+              "SELECT rolsuper OR rolcreaterole OR rolcreatedb FROM pg_roles WHERE rolname='$role'")
+            echo "$role privileged: $super"
+            [ "$super" = "f" ] || { echo "$role must not be superuser/createrole/createdb" >&2; exit 1; }
+          done
+          # And the tables must belong to pdns, not to the bootstrap superuser.
+          owner=$(docker compose exec -T db psql -U postgres -d pdns -tAc \
+            "SELECT tableowner FROM pg_tables WHERE schemaname='public' AND tablename='records'")
+          echo "records owner: $owner"
+          [ "$owner" = "pdns" ] || { echo "records should be owned by pdns, got $owner" >&2; exit 1; }
+
+      - name: Each role is denied the other's tables
+        run: |
+          set -euo pipefail
+          # Prove the isolation rather than assume it. Both of these must fail.
+          if docker compose exec -T db psql -U pdnsadmin -d pdns -tAc \
+               'SELECT count(*) FROM public.domains' 2>/tmp/denied_a.txt; then
+            echo "pdnsadmin could read the PowerDNS tables" >&2; exit 1
+          fi
+          grep -qi "permission denied" /tmp/denied_a.txt \
+            || { echo "expected a permission error, got:" >&2; cat /tmp/denied_a.txt >&2; exit 1; }
+          echo "pdnsadmin -> public.domains: denied"
+
+          if docker compose exec -T db psql -U pdns -d pdns -tAc \
+               'SELECT count(*) FROM pdnsadmin.users' 2>/tmp/denied_b.txt; then
+            echo "pdns could read the admin panel's tables" >&2; exit 1
+          fi
+          grep -qi "permission denied" /tmp/denied_b.txt \
+            || { echo "expected a permission error, got:" >&2; cat /tmp/denied_b.txt >&2; exit 1; }
+          echo "pdns -> pdnsadmin.users: denied"
 
       - name: The web UI answers and serves the Tabler theme
         run: |
@@ -263,18 +317,18 @@ jobs:
           - context: ./webui
             image: pdns-webui
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
           tags: |
@@ -282,7 +336,7 @@ jobs:
             type=sha,format=short
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           push: true

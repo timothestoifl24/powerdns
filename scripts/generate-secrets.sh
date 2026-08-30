@@ -36,6 +36,7 @@ create() {
 }
 
 echo "Generating secrets in $SECRETS_DIR/"
+create db_superuser_password 40
 create pdns_db_password 40
 create webui_db_password 40
 create pdns_api_key 48

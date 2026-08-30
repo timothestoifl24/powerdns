@@ -1,0 +1,136 @@
+# Dependabot version updates.
+#
+# This repository is a good fit for automated updates because CI can actually
+# tell whether a bump broke anything: 246 unit tests, ruff, shellcheck, and a
+# compose smoke test that builds all three images, resolves a record with dig
+# and exercises the login flow. An update that breaks the stack fails the PR
+# rather than reaching a deployment.
+#
+# Cooldown periods keep Dependabot off releases that are only hours old, which
+# is where most regressions get caught by other people first. Cooldown applies
+# to version updates only -- security updates are never delayed by it.
+version: 2
+
+updates:
+  # ---------------------------------------------------------------- Python
+  # The panel's runtime dependencies. Several are security-critical: Authlib
+  # (OAuth/OIDC), python3-saml and its xmlsec/lxml pair, ldap3, and Flask's
+  # session handling. These are the updates most worth having automated.
+  - package-ecosystem: pip
+    directory: /webui
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Vienna
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
+    commit-message:
+      prefix: "webui:"
+    cooldown:
+      default-days: 3
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    groups:
+      # One PR for the routine bumps; majors still arrive on their own so the
+      # changelog actually gets read.
+      python-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  # ------------------------------------------------------------ Base images
+  # postgres:17-alpine, debian:trixie-slim and python:3.13-slim-trixie. These
+  # carry the OS-level security fixes that never show up in requirements.txt.
+  - package-ecosystem: docker
+    directories:
+      - /db
+      - /pdns
+      - /webui
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Vienna
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: "images:"
+    cooldown:
+      default-days: 3
+    groups:
+      docker-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Pinning the major deliberately: a jump to postgres:18 needs a planned
+      # pg_upgrade of the data volume, not a merge. Same for the Debian and
+      # Python majors, which change the PowerDNS version and the ABI of the
+      # xmlsec/lxml wheels respectively.
+      - dependency-name: postgres
+        update-types:
+          - version-update:semver-major
+      - dependency-name: debian
+        update-types:
+          - version-update:semver-major
+      - dependency-name: python
+        update-types:
+          - version-update:semver-major
+
+  # --------------------------------------------------------- Compose images
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Vienna
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: "compose:"
+    cooldown:
+      default-days: 3
+    ignore:
+      # Our own images, published by this repository's own CI and referenced as
+      # :latest. There is no upstream release for Dependabot to track, and a PR
+      # retagging them would be noise at best and a rollback at worst.
+      - dependency-name: ghcr.io/timothestoifl24/*
+
+  # -------------------------------------------------------- GitHub Actions
+  # Worth having: the Node 20 deprecation that had to be found by reading a
+  # CI log would have arrived as a pull request instead.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Vienna
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: "ci:"
+    cooldown:
+      default-days: 3
+    groups:
+      actions-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

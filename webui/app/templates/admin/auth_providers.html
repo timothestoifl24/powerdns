@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}Sign-in providers · {{ site_name }}{% endblock %}
+{% block header_pretitle %}Administration{% endblock %}
+{% block header_title %}Sign-in providers{% endblock %}
+{% block header_actions %}
+  <div class="btn-list">
+    <a href="{{ url_for('authproviders.create', kind='ldap') }}" class="btn">
+      <i class="ti ti-server me-2"></i>Add LDAP
+    </a>
+    <a href="{{ url_for('authproviders.create', kind='oauth') }}" class="btn btn-primary">
+      <i class="ti ti-key me-2"></i>Add OAuth / OIDC
+    </a>
+    <a href="{{ url_for('authproviders.create', kind='saml') }}" class="btn">
+      <i class="ti ti-certificate me-2"></i>Add SAML
+    </a>
+  </div>
+{% endblock %}
+
+{% block content %}
+  {% if env.ldap.enabled or env.saml.enabled or env.oauth_providers %}
+    <div class="alert alert-info" role="alert">
+      <div class="d-flex">
+        <div class="me-2"><i class="ti ti-info-circle"></i></div>
+        <div>
+          <h4 class="alert-title">Some providers come from the environment</h4>
+          <div class="text-secondary">
+            Providers declared with environment variables always win, so a deployment that
+            manages configuration as code keeps doing so. They are listed below as read-only,
+            and a provider added here that collides with one of them is ignored rather than
+            silently applied.
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="card mb-3">
+    <div class="table-responsive">
+      <table class="table card-table table-vcenter">
+        <thead>
+          <tr>
+            <th>Provider</th>
+            <th>Type</th>
+            <th>Status</th>
+            <th class="w-1"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {# Environment-defined providers first: they take precedence. #}
+          {% if env.ldap.enabled %}
+            <tr class="bg-body-tertiary">
+              <td>
+                <div class="fw-medium">LDAP <span class="text-secondary">(environment)</span></div>
+                <div class="text-secondary small font-monospace">{{ env.ldap.uri }}</div>
+              </td>
+              <td>{{ kind_labels['ldap'] }}</td>
+              <td><span class="badge bg-green-lt">Active</span></td>
+              <td><span class="text-secondary small">Read-only</span></td>
+            </tr>
+          {% endif %}
+          {% for provider in env.oauth_providers %}
+            <tr class="bg-body-tertiary">
+              <td>
+                <div class="fw-medium">
+                  {{ provider.display_name }} <span class="text-secondary">(environment)</span>
+                </div>
+                <div class="text-secondary small font-monospace">{{ provider.name }}</div>
+              </td>
+              <td>{{ kind_labels['oauth'] }}</td>
+              <td><span class="badge bg-green-lt">Active</span></td>
+              <td><span class="text-secondary small">Read-only</span></td>
+            </tr>
+          {% endfor %}
+          {% if env.saml.enabled %}
+            <tr class="bg-body-tertiary">
+              <td>
+                <div class="fw-medium">SAML <span class="text-secondary">(environment)</span></div>
+                <div class="text-secondary small font-monospace">
+                  {{ env.saml.idp_metadata_url or env.saml.idp_sso_url }}
+                </div>
+              </td>
+              <td>{{ kind_labels['saml'] }}</td>
+              <td><span class="badge bg-green-lt">Active</span></td>
+              <td><span class="text-secondary small">Read-only</span></td>
+            </tr>
+          {% endif %}
+
+          {% for provider in providers %}
+            <tr class="{{ 'opacity-50' if not provider.enabled }}">
+              <td>
+                <div class="fw-medium">{{ provider.display_name or provider.name }}</div>
+                <div class="text-secondary small font-monospace">{{ provider.name }}</div>
+              </td>
+              <td>{{ kind_labels.get(provider.kind, provider.kind) }}</td>
+              <td>
+                {% if not provider.enabled %}
+                  <span class="badge bg-secondary-lt">Disabled</span>
+                {% elif problems[provider.id] %}
+                  <span class="badge bg-yellow-lt">Not in effect</span>
+                  <div class="text-secondary small mt-1">{{ problems[provider.id] }}</div>
+                {% else %}
+                  <span class="badge bg-green-lt">Active</span>
+                {% endif %}
+              </td>
+              <td>
+                <div class="btn-list flex-nowrap">
+                  <a href="{{ url_for('authproviders.edit', provider_id=provider.id) }}"
+                     class="btn btn-sm">Edit</a>
+                  <form method="post"
+                        action="{{ url_for('authproviders.test', provider_id=provider.id) }}"
+                        class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm" title="Contact the provider now">
+                      Test
+                    </button>
+                  </form>
+                  <form method="post"
+                        action="{{ url_for('authproviders.toggle', provider_id=provider.id) }}"
+                        class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm">
+                      {{ 'Disable' if provider.enabled else 'Enable' }}
+                    </button>
+                  </form>
+                  <form method="post"
+                        action="{{ url_for('authproviders.delete', provider_id=provider.id) }}"
+                        class="d-inline"
+                        data-confirm="Delete {{ provider.name }}? Anyone who signs in through it will lose access.">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-ghost-danger">Delete</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            {% if not (env.ldap.enabled or env.saml.enabled or env.oauth_providers) %}
+              <tr>
+                <td colspan="4" class="text-center text-secondary py-4">
+                  No external providers yet. Local accounts still work.
+                </td>
+              </tr>
+            {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="text-secondary small">
+    Provider secrets are encrypted before they are stored, with a key derived from
+    <code>SECRET_KEY</code>. Changing <code>SECRET_KEY</code> makes them unreadable and each
+    one has to be entered again.
+  </div>
+{% endblock %}

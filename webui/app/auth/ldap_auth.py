@@ -219,3 +219,37 @@ def authenticate(config: LdapConfig, username: str, password: str) -> IdentityCl
             connection.unbind()
         except LDAPException:  # pragma: no cover - best effort cleanup
             pass
+
+
+def test_connection(config: LdapConfig) -> str:
+    """Bind to the directory and report what happened.
+
+    Used by the administration screen so a new provider can be checked without
+    asking someone to attempt a sign-in and interpret the failure. This proves
+    the server is reachable, TLS negotiates and the service account can bind --
+    the three things that go wrong most often.
+    """
+    server = _build_server(config)
+    connection = _service_connection(config, server)
+    if connection is None:
+        raise LdapAuthError(
+            "Could not bind to the directory. Check the URI, the bind DN and its password."
+        )
+    try:
+        found = connection.search(
+            search_base=config.base_dn,
+            search_filter="(objectClass=*)",
+            search_scope="BASE",
+            attributes=[],
+        )
+        if not found:
+            raise LdapAuthError(
+                f"Bound successfully, but the base DN {config.base_dn!r} could not be read."
+            )
+        who = config.bind_dn or "anonymously"
+        return f"bound as {who}, base DN {config.base_dn} is readable"
+    finally:
+        try:
+            connection.unbind()
+        except Exception:  # pragma: no cover - best effort cleanup
+            pass

@@ -5,6 +5,10 @@
 # has no effect on an existing database -- see README, "Upgrading the schema".
 FROM postgres:17-alpine
 
+# The schema lives outside initdb/ on purpose: the entrypoint would run a
+# .sql file there as the bootstrap superuser, leaving every table owned by
+# one. 01-load-powerdns-schema.sh loads it as the unprivileged pdns role.
+COPY schema/powerdns.sql /usr/local/share/powerdns/schema.sql
 COPY initdb/ /docker-entrypoint-initdb.d/
 
 # 01 must run before 02: the entrypoint executes files in lexical order.

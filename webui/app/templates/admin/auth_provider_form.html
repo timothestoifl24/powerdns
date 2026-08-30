@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% set kind_label = kind_labels.get(kind, kind) %}
+{% block title %}{{ 'New' if creating else provider.name }} provider · {{ site_name }}{% endblock %}
+{% block header_pretitle %}Sign-in providers{% endblock %}
+{% block header_title %}{{ 'New ' ~ kind_label if creating else provider.display_name or provider.name }}{% endblock %}
+
+{#
+  A secret is never rendered back into the form. Leaving a secret field empty
+  keeps the stored value, so a URL can be corrected without having the password
+  to hand; the explicit "clear" checkbox is the only way to remove one.
+#}
+{% macro field(name, label, value='', help='', type='text', placeholder='') %}
+  <div class="mb-3">
+    <label class="form-label" for="{{ name }}">{{ label }}</label>
+    <input type="{{ type }}" class="form-control" id="{{ name }}" name="{{ name }}"
+           value="{{ value }}" placeholder="{{ placeholder }}" autocomplete="off">
+    {% if help %}<small class="form-hint">{{ help }}</small>{% endif %}
+  </div>
+{% endmacro %}
+
+{% macro secret(name, label, stored, help='') %}
+  <div class="mb-3">
+    <label class="form-label" for="{{ name }}">{{ label }}</label>
+    <input type="password" class="form-control" id="{{ name }}" name="{{ name }}"
+           placeholder="{{ 'unchanged — leave empty to keep' if stored else 'not set' }}"
+           autocomplete="new-password">
+    <small class="form-hint">
+      {{ help }}
+      {% if stored %}
+        <label class="form-check form-check-inline mt-1">
+          <input class="form-check-input" type="checkbox" name="clear_{{ name }}">
+          <span class="form-check-label">Clear the stored value</span>
+        </label>
+      {% endif %}
+    </small>
+  </div>
+{% endmacro %}
+
+{% macro toggle(name, label, checked, help='') %}
+  <label class="form-check form-switch">
+    <input class="form-check-input" type="checkbox" name="{{ name }}" {{ 'checked' if checked }}>
+    <span class="form-check-label">{{ label }}</span>
+  </label>
+  {% if help %}<small class="form-hint d-block mb-3">{{ help }}</small>{% endif %}
+{% endmacro %}
+
+{% block content %}
+  {% if problem is defined and problem %}
+    <div class="alert alert-warning">{{ problem }}</div>
+  {% endif %}
+
+  <form method="post" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="row">
+      <div class="col-lg-8">
+
+        <div class="card mb-3">
+          <div class="card-header"><h3 class="card-title">Identity</h3></div>
+          <div class="card-body">
+            {{ field('name', 'Name', provider.name,
+                     'Lower-case, URL-safe. For OAuth this appears in the callback URL, so
+                      changing it later means re-registering the redirect URI.') }}
+            {{ field('display_name', 'Display name', provider.display_name,
+                     'Shown on the sign-in button.') }}
+            {{ toggle('enabled', 'Enabled', provider.enabled if provider.id else True) }}
+          </div>
+        </div>
+
+        <div class="card mb-3">
+          <div class="card-header"><h3 class="card-title">{{ kind_label }}</h3></div>
+          <div class="card-body">
+            {% if kind == 'ldap' %}
+              {{ field('uri', 'Server URI', provider.setting('uri'),
+                       'ldap://host:389 or ldaps://host:636', placeholder='ldaps://dc.example.com') }}
+              {{ toggle('start_tls', 'Use StartTLS', provider.settings.get('start_tls'),
+                        'For ldap:// on port 389. Not needed with ldaps://.') }}
+              {{ toggle('tls_verify', 'Verify the TLS certificate',
+                        provider.settings.get('tls_verify', True),
+                        'Leave on. Turning it off accepts any certificate, including an attacker\'s.') }}
+              {{ field('ca_cert_file', 'CA certificate file', provider.setting('ca_cert_file'),
+                       'Path inside the container, for a private CA.') }}
+              {{ field('bind_dn', 'Bind DN', provider.setting('bind_dn'),
+                       'Service account used to search for users.',
+                       placeholder='cn=svc-dns,ou=Service Accounts,dc=example,dc=com') }}
+              {{ secret('bind_password', 'Bind password',
+                        provider.secrets.get('bind_password')) }}
+              {{ field('base_dn', 'Base DN', provider.setting('base_dn'),
+                       placeholder='dc=example,dc=com') }}
+              {{ field('user_filter', 'User filter',
+                       provider.setting('user_filter',
+                         '(&(objectClass=person)({username_attribute}={username}))'),
+                       '{username} is replaced with the typed name, escaped per RFC 4515.') }}
+              {{ field('username_attribute', 'Username attribute',
+                       provider.setting('username_attribute', 'uid'),
+                       'uid for OpenLDAP, sAMAccountName for Active Directory.') }}
+              {{ field('email_attribute', 'Email attribute',
+                       provider.setting('email_attribute', 'mail')) }}
+              {{ field('display_name_attribute', 'Display name attribute',
+                       provider.setting('display_name_attribute', 'cn')) }}
+              {{ field('group_attribute', 'Group attribute',
+                       provider.setting('group_attribute', 'memberOf'),
+                       'Read from the user entry. Values may be full DNs; the group mapping
+                        below matches either the DN or its common name.') }}
+              {{ field('group_search_base', 'Group search base',
+                       provider.setting('group_search_base'),
+                       'Only for directories without memberOf, such as posixGroup setups.') }}
+              {{ field('group_filter', 'Group filter', provider.setting('group_filter')) }}
+
+            {% elif kind == 'oauth' %}
+              <p class="text-secondary">
+                Give a discovery URL for OpenID Connect (Keycloak, Authentik, Entra ID, Google,
+                Okta). Providers that only speak plain OAuth 2.0, GitHub being the usual one,
+                need the three endpoint URLs instead.
+              </p>
+              {{ field('discovery_url', 'Discovery URL', provider.setting('discovery_url'),
+                       'OpenID Connect only.',
+                       placeholder='https://idp.example.com/.well-known/openid-configuration') }}
+              {{ field('client_id', 'Client ID', provider.setting('client_id')) }}
+              {{ secret('client_secret', 'Client secret',
+                        provider.secrets.get('client_secret')) }}
+              {{ field('scopes', 'Scopes', provider.setting('scopes'),
+                       'Defaults to "openid email profile" for OIDC.') }}
+              <hr>
+              <p class="text-secondary">Plain OAuth 2.0 only — leave empty when using discovery.</p>
+              {{ field('authorize_url', 'Authorize URL', provider.setting('authorize_url')) }}
+              {{ field('token_url', 'Token URL', provider.setting('token_url')) }}
+              {{ field('userinfo_url', 'Userinfo URL', provider.setting('userinfo_url')) }}
+              {{ field('jwks_url', 'JWKS URL', provider.setting('jwks_url')) }}
+              <hr>
+              {{ field('username_claim', 'Username claim', provider.setting('username_claim')) }}
+              {{ field('email_claim', 'Email claim', provider.setting('email_claim', 'email')) }}
+              {{ field('name_claim', 'Name claim', provider.setting('name_claim', 'name')) }}
+              {{ field('groups_claim', 'Groups claim', provider.setting('groups_claim', 'groups')) }}
+              {{ field('icon', 'Icon', provider.setting('icon', 'ti-key'),
+                       'A Tabler icon name, for example ti-brand-github.') }}
+
+            {% elif kind == 'saml' %}
+              {{ field('idp_metadata_url', 'IdP metadata URL',
+                       provider.setting('idp_metadata_url'),
+                       'The simplest option: endpoints and the signing certificate are read
+                        from it.') }}
+              <hr>
+              <p class="text-secondary">Or configure the IdP by hand:</p>
+              {{ field('idp_entity_id', 'IdP entity ID', provider.setting('idp_entity_id')) }}
+              {{ field('idp_sso_url', 'IdP SSO URL', provider.setting('idp_sso_url')) }}
+              {{ field('idp_slo_url', 'IdP logout URL', provider.setting('idp_slo_url')) }}
+              {{ secret('idp_x509_cert', 'IdP signing certificate',
+                        provider.secrets.get('idp_x509_cert'),
+                        'PEM body. Required without a metadata URL — it is what validates the
+                         assertion signature.') }}
+              <hr>
+              {{ field('sp_entity_id', 'SP entity ID', provider.setting('sp_entity_id'),
+                       'Defaults to this panel\'s metadata URL.') }}
+              {{ secret('sp_x509_cert', 'SP certificate', provider.secrets.get('sp_x509_cert'),
+                        'Only needed if the IdP requires signed requests.') }}
+              {{ secret('sp_private_key', 'SP private key',
+                        provider.secrets.get('sp_private_key')) }}
+              {{ field('name_id_format', 'NameID format', provider.setting('name_id_format')) }}
+              <hr>
+              {{ field('attr_username', 'Username attribute',
+                       provider.setting('attr_username', 'username')) }}
+              {{ field('attr_email', 'Email attribute', provider.setting('attr_email', 'email')) }}
+              {{ field('attr_name', 'Display name attribute',
+                       provider.setting('attr_name', 'displayName')) }}
+              {{ field('attr_groups', 'Groups attribute',
+                       provider.setting('attr_groups', 'groups')) }}
+              <hr>
+              {{ toggle('want_assertions_signed', 'Require signed assertions',
+                        provider.settings.get('want_assertions_signed', True),
+                        'Leave on. Without it, an unsigned assertion would be accepted.') }}
+              {{ toggle('want_messages_signed', 'Require signed messages',
+                        provider.settings.get('want_messages_signed')) }}
+              {{ toggle('want_name_id_encrypted', 'Require an encrypted NameID',
+                        provider.settings.get('want_name_id_encrypted')) }}
+              {{ toggle('strict', 'Strict mode',
+                        provider.settings.get('strict', True),
+                        'Leave on. Strict mode is what enforces the checks above.') }}
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-4">
+        <div class="card mb-3">
+          <div class="card-header"><h3 class="card-title">Role mapping</h3></div>
+          <div class="card-body">
+            <p class="text-secondary small">
+              Groups from the provider decide the role. Comma-separated; matching is
+              case-insensitive and accepts either a full DN or its common name.
+            </p>
+            {{ field('admin_group', 'Administrator groups', provider.setting('admin_group')) }}
+            {{ field('operator_group', 'Operator groups', provider.setting('operator_group')) }}
+            {{ field('user_group', 'User groups', provider.setting('user_group')) }}
+            <div class="mb-3">
+              <label class="form-label" for="default_role">Default role</label>
+              <select class="form-select" id="default_role" name="default_role">
+                <option value="none" {{ 'selected' if provider.setting('default_role', 'user') in ('none', '') }}>
+                  Refuse access
+                </option>
+                {% for role in roles %}
+                  <option value="{{ role }}"
+                          {{ 'selected' if provider.setting('default_role', 'user') == role }}>
+                    {{ role|capitalize }}
+                  </option>
+                {% endfor %}
+              </select>
+              <small class="form-hint">
+                Applied when no group matches. "Refuse access" restricts sign-in to members of
+                the groups above.
+              </small>
+            </div>
+          </div>
+        </div>
+
+        {% if kind == 'oauth' and provider.name %}
+          <div class="card mb-3">
+            <div class="card-header"><h3 class="card-title">Redirect URI</h3></div>
+            <div class="card-body">
+              <p class="text-secondary small">Register this with the provider, exactly:</p>
+              <code class="d-block text-wrap">
+                {{ url_for('auth.oauth_callback', provider=provider.name, _external=True) }}
+              </code>
+              <small class="form-hint mt-2 d-block">
+                Behind a reverse proxy, set <code>BASE_URL</code> so this matches the address
+                users actually reach.
+              </small>
+            </div>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="btn-list">
+      <button type="submit" class="btn btn-primary">Save provider</button>
+      <a href="{{ url_for('authproviders.index') }}" class="btn">Cancel</a>
+    </div>
+  </form>
+{% endblock %}

@@ -19,20 +19,26 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME:-pdns}
-      POSTGRES_USER: ${PDNS_DB_USER:-pdns}
-      POSTGRES_PASSWORD_FILE: /run/secrets/pdns_db_password
-      # Consumed by the init script that provisions the panel's role/schema.
+      # The bootstrap superuser. It runs initdb and the scripts in
+      # /docker-entrypoint-initdb.d, and nothing connects as it afterwards --
+      # PowerDNS and the panel each get their own unprivileged role below.
+      POSTGRES_USER: ${DB_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_superuser_password
+      # Consumed by 00-roles.sh, which creates both application roles.
+      PDNS_DB_USER: ${PDNS_DB_USER:-pdns}
+      PDNS_DB_PASSWORD_FILE: /run/secrets/pdns_db_password
       WEBUI_DB_USER: ${WEBUI_DB_USER:-pdnsadmin}
       WEBUI_DB_PASSWORD_FILE: /run/secrets/webui_db_password
       WEBUI_DB_SCHEMA: ${WEBUI_DB_SCHEMA:-pdnsadmin}
     volumes:
       - pgdata:/var/lib/postgresql/data
     secrets:
+      - db_superuser_password
       - pdns_db_password
       - webui_db_password
     healthcheck:
       # Gates both other services: neither starts before the schema is loaded.
-      test: ["CMD-SHELL", "pg_isready -U ${PDNS_DB_USER:-pdns} -d ${DB_NAME:-pdns}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_SUPERUSER:-postgres} -d ${DB_NAME:-pdns}"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -141,6 +147,8 @@ volumes:
   pgdata:
 
 secrets:
+  db_superuser_password:
+    file: ./secrets/db_superuser_password
   pdns_db_password:
     file: ./secrets/pdns_db_password
   webui_db_password:

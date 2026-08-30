@@ -27,7 +27,7 @@ jobs:
     name: Unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
@@ -58,7 +58,7 @@ jobs:
     name: Shell scripts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: ShellCheck
         run: |
           set -euo pipefail
@@ -81,7 +81,7 @@ jobs:
       # still runs the real compose.yml.
       COMPOSE_FILE: compose.yml:compose.ci.yml
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Generate secrets and .env
         run: |
@@ -317,7 +317,7 @@ jobs:
           - context: ./webui
             image: pdns-webui
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v4
 

@@ -86,7 +86,7 @@ plain environment variable instead of a file — each one accepts both `FOO` and
 │   ├── app/                  the panel
 │   └── tests/                246 tests, incl. an in-memory PowerDNS
 ├── scripts/generate-secrets.sh
-└── docs/database-choice.md   why PostgreSQL and not MongoDB
+└── docs/                     the documentation site (VitePress)
 ```
 
 ## Roles

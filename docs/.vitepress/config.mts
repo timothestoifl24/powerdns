@@ -11,10 +11,6 @@ export default defineConfig({
   lastUpdated: true,
   sitemap: { hostname: 'https://powerdns.stoifl.app' },
 
-  // Kept in the repository for contributors, deliberately not published: it is
-  // an internal design rationale, not something a user of the stack needs.
-  srcExclude: ['database-choice.md'],
-
   // The panel's own URLs are meant to be unreachable from a build machine.
   ignoreDeadLinks: [/^https?:\/\/(localhost|127\.0\.0\.1)/],
 

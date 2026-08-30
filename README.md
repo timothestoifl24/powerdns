@@ -268,6 +268,44 @@ python -m app.cli init && flask --app wsgi:application run --debug
 (The compose file does not publish 5432 or 8081 to the host; add the ports
 temporarily if you want to develop this way.)
 
+## Troubleshooting
+
+**`Permission denied` reading `/run/secrets/...` and the database container
+exits.** The files under `secrets/` must be world-readable (`0644`). Compose
+bind-mounts them into the containers with their host ownership intact, and the
+processes that read them are unprivileged — `postgres` (uid 70) runs the initdb
+scripts and the panel runs as uid 10001. The `0700` directory is what keeps
+other users on the host out. `./scripts/generate-secrets.sh` sets this
+correctly and repairs an existing `secrets/` directory; to fix it by hand:
+
+```bash
+chmod 0700 secrets && chmod 0644 secrets/*
+```
+
+**The stack started once with an error and now the panel cannot connect.**
+PostgreSQL runs the scripts in `db/initdb/` only while the data directory is
+empty. If one of them fails, the directory is left half-initialised and every
+later start logs *"Database directory appears to contain a database; Skipping
+initialization"* — so the panel's role and schema never get created. Start over
+with a clean volume:
+
+```bash
+docker compose down -v && docker compose up -d --build
+```
+
+`down -v` deletes the volume, and with it every zone. On a system with real
+data, dump the database first.
+
+**Login appears to succeed but bounces straight back to the sign-in page.**
+`SESSION_COOKIE_SECURE=true` over plain HTTP: the browser never sends the
+session cookie back. Set it to `false` for HTTP, or put the panel behind TLS.
+
+**The OAuth provider rejects the redirect URI.** Set `BASE_URL` to the public
+URL of the panel. Without it the panel derives the callback from the request it
+sees, which behind a proxy is the internal hostname, and providers match the
+registered URI exactly. **Administration → Settings** prints the exact URI to
+register.
+
 ## Security notes
 
 - The PowerDNS API port is **not** published to the host. Only the `webui`

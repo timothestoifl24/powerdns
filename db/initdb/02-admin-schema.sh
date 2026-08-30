@@ -10,7 +10,20 @@ set -euo pipefail
 WEBUI_DB_USER="${WEBUI_DB_USER:-pdnsadmin}"
 WEBUI_DB_SCHEMA="${WEBUI_DB_SCHEMA:-pdnsadmin}"
 
-if [ -n "${WEBUI_DB_PASSWORD_FILE:-}" ] && [ -f "${WEBUI_DB_PASSWORD_FILE}" ]; then
+if [ -n "${WEBUI_DB_PASSWORD_FILE:-}" ]; then
+  if [ ! -e "${WEBUI_DB_PASSWORD_FILE}" ]; then
+    echo "db-init: ${WEBUI_DB_PASSWORD_FILE} does not exist." >&2
+    echo "db-init: run ./scripts/generate-secrets.sh before starting the stack." >&2
+    exit 1
+  fi
+  if [ ! -r "${WEBUI_DB_PASSWORD_FILE}" ]; then
+    # This script runs as the unprivileged postgres user, so a 0600 secret
+    # owned by the host user is unreadable here.
+    echo "db-init: ${WEBUI_DB_PASSWORD_FILE} is not readable by $(id -un) (uid $(id -u))." >&2
+    echo "db-init: secret files must be world-readable. Fix with:" >&2
+    echo "db-init:   chmod 0644 secrets/*   (the 0700 secrets/ directory is what protects them)" >&2
+    exit 1
+  fi
   WEBUI_DB_PASSWORD="$(cat "${WEBUI_DB_PASSWORD_FILE}")"
 fi
 

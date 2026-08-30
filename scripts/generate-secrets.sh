@@ -7,19 +7,31 @@ cd "$(dirname "$0")/.."
 
 SECRETS_DIR=secrets
 mkdir -p "$SECRETS_DIR"
+# The directory is what keeps other users on this host out.
 chmod 0700 "$SECRETS_DIR"
+
+# The secret files themselves have to be world-readable, because compose
+# bind-mounts them into the containers with their host ownership intact and the
+# processes that read them are unprivileged: postgres (uid 70) runs the initdb
+# scripts, and the panel runs as uid 10001. Neither can read a 0600 file owned
+# by the host user. Docker Swarm mounts secrets 0444 for the same reason.
+# Confidentiality here comes from the 0700 directory above.
+SECRET_MODE=0644
 
 random() { LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "${1:-48}"; }
 
 create() {
   local length="${2:-48}" path="$SECRETS_DIR/$1"
   if [ -s "$path" ]; then
+    # Re-apply the mode: an existing file from an older checkout may be 0600,
+    # which makes the containers fail to start with "Permission denied".
+    chmod "$SECRET_MODE" "$path"
     echo "  keep   $path"
     return
   fi
   # No trailing newline: consumers strip one, but a bare value is unambiguous.
   printf '%s' "$(random "$length")" > "$path"
-  chmod 0600 "$path"
+  chmod "$SECRET_MODE" "$path"
   echo "  create $path"
 }
 

@@ -16,3 +16,8 @@ htmlcov/
 webui/app/static/vendor/
 
 .DS_Store
+
+# VitePress documentation site
+docs/node_modules/
+docs/.vitepress/dist/
+docs/.vitepress/cache/

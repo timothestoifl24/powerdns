@@ -60,6 +60,10 @@ jobs:
   smoke:
     name: End-to-end compose smoke test
     runs-on: ubuntu-latest
+    env:
+      # Layers compose.ci.yml on top, so every `docker compose` call below
+      # still runs the real compose.yml.
+      COMPOSE_FILE: compose.yml:compose.ci.yml
     steps:
       - uses: actions/checkout@v4
 
@@ -121,7 +125,7 @@ jobs:
         run: |
           set -euo pipefail
           docker compose exec -T db psql -U pdns -d pdns -c \
-            "SELECT table_name FROM information_schema.tables WHERE table_schema='pdnsadmin' ORDER BY 1" \
+            "SELECT tablename FROM pg_tables WHERE schemaname='pdnsadmin' ORDER BY 1" \
             | tee /tmp/admin_tables.txt
           for table in users zone_access audit_log app_settings; do
             grep -q "$table" /tmp/admin_tables.txt || { echo "missing table: $table" >&2; exit 1; }
@@ -182,9 +186,19 @@ jobs:
 
           # The real test: PowerDNS reads it back out of PostgreSQL and answers
           # a query on port 53.
-          answer=$(dig +short @127.0.0.1 -p 5353 www.smoke.test A)
-          echo "dig returned: $answer"
-          [ "$answer" = "192.0.2.42" ] || { echo "unexpected answer" >&2; exit 1; }
+          for attempt in $(seq 1 12); do
+            answer=$(dig +short @127.0.0.1 -p 5353 www.smoke.test A || true)
+            [ "$answer" = "192.0.2.42" ] && break
+            echo "attempt $attempt: got '${answer:-<empty>}', retrying"
+            sleep 5
+          done
+          echo "dig returned: ${answer:-<empty>}"
+          if [ "$answer" != "192.0.2.42" ]; then
+            echo "::error::PowerDNS did not serve the record created through the API"
+            dig @127.0.0.1 -p 5353 www.smoke.test A || true
+            docker compose logs --tail 50 pdns
+            exit 1
+          fi
 
       - name: The zone shows up in the panel for the administrator
         run: |

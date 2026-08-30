@@ -342,6 +342,13 @@ register.
 - Every change made through the panel is written to an append-only audit log,
   visible under **Administration → Audit log**. Entries survive deletion of
   the user who made them.
+- **Known limitation:** the role PowerDNS uses for its own tables is the one
+  the postgres image creates from `POSTGRES_USER`, which is a superuser. That
+  is how nearly every PowerDNS container guide is set up, but it is more
+  privilege than PowerDNS needs. The admin panel's role (`pdnsadmin`) is *not*
+  a superuser and owns only its own schema, so the separation the panel relies
+  on holds. Tightening the PowerDNS role to plain DML on `public` is a
+  worthwhile follow-up.
 
 ## Licence
 

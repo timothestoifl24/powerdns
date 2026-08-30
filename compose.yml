@@ -1,62 +1,151 @@
-services:
-  pdns:
-    image: ghcr.io/timothestoifl24/pdns:latest
-    container_name: pdns-server
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      PDNS_pgsql_host: ${PDNS_PGSQL_HOST}
-      PDNS_pgsql_user: ${PDNS_PGSQL_USER}
-      PDNS_pgsql_password_file: /run/secrets/pgsql_password
-      PDNS_pgsql_dbname: ${PDNS_PGSQL_DBNAME}
-      PDNS_api_key_file: /run/secrets/pdns_api_key
-    ports:
-      - "53:53/tcp"
-      - "53:53/udp"
-      - "8081:8081"
-    depends_on:
-      - db
-    secrets:
-      - pgsql_password
-      - pdns_api_key
+# PowerDNS + PostgreSQL + web admin panel.
+#
+# First run:
+#   ./scripts/generate-secrets.sh   # creates secrets/ and .env
+#   docker compose up -d --build
+#   open http://localhost:9191
+#
+# Secrets are read from files in ./secrets rather than from the environment,
+# so they never appear in `docker inspect` or in the shell history.
 
+name: powerdns
+
+services:
   db:
+    build:
+      context: ./db
     image: ghcr.io/timothestoifl24/pdns-db:latest
     container_name: pdns-db
     restart: unless-stopped
-    env_file:
-      - .env
     environment:
-      POSTGRES_DB: ${PDNS_PGSQL_DBNAME}
-      POSTGRES_USER: ${PDNS_PGSQL_USER}
-      POSTGRES_PASSWORD_FILE: /run/secrets/pgsql_password
-    ports:
-      - "5432:5432"
-    secrets:
-      - pgsql_password
-
-  pdns-admin:
-    image: ghcr.io/timothestoifl24/pdns-admin:latest
-    container_name: pdns-admin
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      GUNICORN_THREADS: 1
-      PDNS_API_KEY_FILE: /run/secrets/pdns_api_key
-    ports:
-      - "9191:80"
-    depends_on:
-      - db
+      POSTGRES_DB: ${DB_NAME:-pdns}
+      POSTGRES_USER: ${PDNS_DB_USER:-pdns}
+      POSTGRES_PASSWORD_FILE: /run/secrets/pdns_db_password
+      # Consumed by the init script that provisions the panel's role/schema.
+      WEBUI_DB_USER: ${WEBUI_DB_USER:-pdnsadmin}
+      WEBUI_DB_PASSWORD_FILE: /run/secrets/webui_db_password
+      WEBUI_DB_SCHEMA: ${WEBUI_DB_SCHEMA:-pdnsadmin}
     volumes:
-      - ./pdns-admin/config.py:/opt/webapp/config.py
+      - pgdata:/var/lib/postgresql/data
     secrets:
+      - pdns_db_password
+      - webui_db_password
+    healthcheck:
+      # Gates both other services: neither starts before the schema is loaded.
+      test: ["CMD-SHELL", "pg_isready -U ${PDNS_DB_USER:-pdns} -d ${DB_NAME:-pdns}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - backend
+
+  pdns:
+    build:
+      context: ./pdns
+    image: ghcr.io/timothestoifl24/pdns:latest
+    container_name: pdns-server
+    restart: unless-stopped
+    environment:
+      PDNS_GPGSQL_HOST: db
+      PDNS_GPGSQL_PORT: "5432"
+      PDNS_GPGSQL_USER: ${PDNS_DB_USER:-pdns}
+      PDNS_GPGSQL_PASSWORD_FILE: /run/secrets/pdns_db_password
+      PDNS_GPGSQL_DBNAME: ${DB_NAME:-pdns}
+      PDNS_API_KEY_FILE: /run/secrets/pdns_api_key
+      PDNS_DEFAULT_SOA_CONTENT: ${PDNS_DEFAULT_SOA_CONTENT:-ns1.example.com hostmaster.example.com 0 10800 3600 604800 3600}
+      PDNS_VERSION_STRING: ${PDNS_VERSION_STRING:-anonymous}
+      PDNS_LOGLEVEL: ${PDNS_LOGLEVEL:-4}
+    ports:
+      # The DNS service itself. The API on 8081 is deliberately NOT published:
+      # only the webui container needs it, over the internal network.
+      - "${DNS_BIND_ADDRESS:-0.0.0.0}:53:53/tcp"
+      - "${DNS_BIND_ADDRESS:-0.0.0.0}:53:53/udp"
+    depends_on:
+      db:
+        condition: service_healthy
+    secrets:
+      - pdns_db_password
       - pdns_api_key
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/53' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - backend
+
+  webui:
+    build:
+      context: ./webui
+    image: ghcr.io/timothestoifl24/pdns-webui:latest
+    container_name: pdns-webui
+    restart: unless-stopped
+    environment:
+      SECRET_KEY_FILE: /run/secrets/webui_secret_key
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-pdns}
+      DB_USER: ${WEBUI_DB_USER:-pdnsadmin}
+      DB_PASSWORD_FILE: /run/secrets/webui_db_password
+      DB_SCHEMA: ${WEBUI_DB_SCHEMA:-pdnsadmin}
+      PDNS_API_URL: http://pdns:8081
+      PDNS_API_KEY_FILE: /run/secrets/pdns_api_key
+      SITE_NAME: ${SITE_NAME:-PowerDNS Admin}
+      BASE_URL: ${BASE_URL:-}
+      # Set to true once the panel is behind HTTPS; a secure cookie is not
+      # sent over plain HTTP, which would break login entirely.
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-0}
+      DEFAULT_NAMESERVERS: ${DEFAULT_NAMESERVERS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # First-run administrator. Ignored once any user exists.
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      BOOTSTRAP_ADMIN_PASSWORD_FILE: /run/secrets/webui_admin_password
+      # Authentication backends are configured entirely through .env --
+      # see .env.example and README for LDAP / OAuth / SAML settings.
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "${WEBUI_PORT:-9191}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      pdns:
+        condition: service_started
+    secrets:
+      - webui_secret_key
+      - webui_db_password
+      - webui_admin_password
+      - pdns_api_key
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5).status == 200 else 1)"
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  pgdata:
 
 secrets:
-  pgsql_password:
-    file: ./secrets/pgsql_password.key
+  pdns_db_password:
+    file: ./secrets/pdns_db_password
+  webui_db_password:
+    file: ./secrets/webui_db_password
   pdns_api_key:
-    file: ./secrets/pdns_api_key.key
-    
+    file: ./secrets/pdns_api_key
+  webui_secret_key:
+    file: ./secrets/webui_secret_key
+  webui_admin_password:
+    file: ./secrets/webui_admin_password

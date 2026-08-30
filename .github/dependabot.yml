@@ -86,6 +86,12 @@ updates:
       - dependency-name: python
         update-types:
           - version-update:semver-major
+          # Docker tags make 3.13 -> 3.14 a *minor* bump, but that is a Python
+          # feature release: it changes the ABI the xmlsec and lxml wheels are
+          # built against, and it must be paired with the python-version pin in
+          # ci.yml or the suite stops testing what the image ships. Patch
+          # updates (3.14.x) still arrive automatically.
+          - version-update:semver-minor
 
   # --------------------------------------------------------- Compose images
   - package-ecosystem: docker-compose

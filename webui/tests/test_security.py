@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from werkzeug.security import check_password_hash
 
@@ -135,3 +137,142 @@ class TestSecurityHeaders:
         csp = client.get("/auth/login").headers["Content-Security-Policy"]
         assert "script-src 'self'" in csp
         assert "unsafe-inline" not in csp.split("script-src")[1].split(";")[0]
+
+
+class TestSchemaNameValidation:
+    """DB_SCHEMA is the one config value that reaches SQL as text, not as a
+    bound parameter, so it is validated rather than trusted."""
+
+    @pytest.mark.parametrize("schema", ["pdnsadmin", "PdnsAdmin", "_private", "s3", "a" * 63])
+    def test_valid_identifiers_accepted(self, schema):
+        from app.database import validate_schema_name
+
+        assert validate_schema_name(schema) == schema
+
+    @pytest.mark.parametrize(
+        "schema",
+        [
+            "",
+            "3leading",
+            "has space",
+            "has-dash",
+            'quote"inject',
+            'x"; DROP SCHEMA public CASCADE; --',
+            "public,evil",
+            "a" * 64,
+        ],
+    )
+    def test_injection_shaped_values_rejected(self, schema):
+        from app.database import validate_schema_name
+
+        with pytest.raises(ValueError, match="not a valid PostgreSQL identifier"):
+            validate_schema_name(schema)
+
+    def test_engine_creation_rejects_a_bad_schema(self):
+        from app.database import make_engine
+
+        with pytest.raises(ValueError):
+            make_engine("postgresql+psycopg://u:p@h/db", 'evil"; --')
+
+
+class TestTransportHeaders:
+    def test_hsts_absent_over_plain_http(self, client):
+        """Pinning HTTPS on an HTTP-only deployment would lock users out."""
+        assert "Strict-Transport-Security" not in client.get("/auth/login").headers
+
+    def test_hsts_present_when_deployment_is_https(self, make_app):
+        app = make_app(SESSION_COOKIE_SECURE="true")
+        response = app.test_client().get("/auth/login")
+        assert "max-age=31536000" in response.headers["Strict-Transport-Security"]
+
+
+class TestEveryRouteIsGuarded:
+    """A route added without an auth decorator should fail CI, not ship.
+
+    Decorator introspection cannot do this -- functools.wraps copies the inner
+    function's name onto the wrapper -- so these walk the URL map and check
+    what the app actually does with an anonymous caller.
+    """
+
+    #: Endpoints that must stay reachable without a session: the login form
+    #: itself, the OAuth/SAML handshake (the caller is not signed in yet, by
+    #: definition), static assets, and the container healthchecks.
+    PUBLIC_ENDPOINTS = {
+        "auth.login",
+        "auth.logout",
+        "auth.oauth_login",
+        "auth.oauth_callback",
+        "auth.saml_login",
+        "auth.saml_acs",
+        "auth.saml_metadata",
+        "auth.saml_sls",
+        "static",
+        "healthz",
+        "readyz",
+    }
+
+    SAMPLE_ARGS = {
+        "user_id": "1",
+        "provider": "keycloak",
+        "zone_id": "example.com.",
+        "filename": "css/app.css",
+    }
+
+    def _urls(self, app):
+        for rule in sorted(app.url_map.iter_rules(), key=str):
+            if rule.endpoint in self.PUBLIC_ENDPOINTS:
+                continue
+            url = str(rule)
+            for key, value in self.SAMPLE_ARGS.items():
+                url = (
+                    url.replace(f"<int:{key}>", value)
+                    .replace(f"<path:{key}>", value)
+                    .replace(f"<{key}>", value)
+                )
+            for method in sorted(rule.methods - {"HEAD", "OPTIONS"}):
+                yield method, url
+
+    @staticmethod
+    def _anonymous_csrf_token(client):
+        """An anonymous caller can get a valid token -- the login form needs one."""
+        page = client.get("/auth/login").get_data(as_text=True)
+        match = re.search(r'name="csrf_token"[^>]*value="([^"]+)"', page)
+        assert match, "login form should carry a CSRF token"
+        return match.group(1)
+
+    @staticmethod
+    def _redirects_to_login(response):
+        if response.status_code in (401, 403):
+            return True
+        return response.status_code in (301, 302, 303, 307, 308) and (
+            "login" in response.headers.get("Location", "").lower()
+        )
+
+    def test_authentication_guards_every_route(self, app, client):
+        """No route is reachable without a session.
+
+        Unsafe methods are sent *with* a valid CSRF token, so the CSRF layer
+        cannot mask a missing authentication decorator: whatever refuses the
+        request here is the authentication check.
+        """
+        token = self._anonymous_csrf_token(client)
+        reachable = []
+        for method, url in self._urls(app):
+            kwargs = {"follow_redirects": False}
+            if method not in ("GET", "HEAD", "OPTIONS"):
+                kwargs["data"] = {"csrf_token": token}
+            response = client.open(url, method=method, **kwargs)
+            if not self._redirects_to_login(response):
+                reachable.append((method, url, response.status_code))
+        assert not reachable, f"routes reachable without authentication: {reachable}"
+
+    def test_unsafe_methods_also_require_a_csrf_token(self, app, client):
+        """The second layer: a state-changing request with no token is rejected."""
+        accepted = []
+        for method, url in self._urls(app):
+            if method in ("GET", "HEAD", "OPTIONS"):
+                continue
+            response = client.open(url, method=method, follow_redirects=False)
+            if response.status_code != 400:
+                accepted.append((method, url, response.status_code))
+        assert not accepted, f"state-changing routes without CSRF enforcement: {accepted}"

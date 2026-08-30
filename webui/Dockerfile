@@ -48,8 +48,12 @@ COPY requirements.txt .
 # psycopg, lxml and xmlsec all publish manylinux wheels, so no compiler and no
 # libxmlsec1-dev are needed. --only-binary keeps it that way: if a wheel ever
 # disappears the build fails here instead of silently pulling in a toolchain.
+# setuptools and wheel are deliberately NOT installed: --only-binary below
+# means nothing is ever built from source, so they would be unused code in the
+# runtime image and a recurring source of CVE noise. Python 3.12+ no longer
+# seeds them into a venv, so this leaves the image with neither.
 RUN python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --upgrade pip setuptools wheel \
+    && /opt/venv/bin/pip install --upgrade pip \
     && /opt/venv/bin/pip install --only-binary=:all: -r requirements.txt
 
 # ---------------------------------------------------------------------------

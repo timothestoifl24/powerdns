@@ -106,6 +106,13 @@ def register_hooks(app: Flask) -> None:
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "same-origin")
+        # Only meaningful over HTTPS, and actively harmful over plain HTTP
+        # (it would pin a host the panel cannot serve). SESSION_COOKIE_SECURE
+        # is the operator's statement that this deployment is HTTPS-only.
+        if app.config["SESSION_COOKIE_SECURE"]:
+            response.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
         # Everything is served from our own origin: Tabler is vendored into the
         # image, so no CDN needs to be allowed here.
         response.headers.setdefault(

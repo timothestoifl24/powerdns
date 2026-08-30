@@ -54,7 +54,15 @@ admin_user="$(sed -n 's/^BOOTSTRAP_ADMIN_USERNAME=//p' .env 2>/dev/null | tr -d 
 echo
 echo "Initial administrator login:"
 echo "  username: ${admin_user:-admin}"
-echo "  password: $(cat "$SECRETS_DIR/webui_admin_password")"
+if [ -t 1 ]; then
+  echo "  password: $(cat "$SECRETS_DIR/webui_admin_password")"
+else
+  # stdout is a pipe or a file -- a CI job log, `tee setup.log`, a ticket
+  # attachment. Printing the password there puts it somewhere it will outlive
+  # its usefulness, so show where to read it instead.
+  echo "  password: not shown (stdout is not a terminal)"
+  echo "            read it with: cat $SECRETS_DIR/webui_admin_password"
+fi
 echo
 echo "Change this password after the first sign-in. The file stays on disk so"
 echo "you can look it up again, but it is only used while no users exist."

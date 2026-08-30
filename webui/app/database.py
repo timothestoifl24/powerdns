@@ -8,6 +8,7 @@ touches the database never opens a connection.
 from __future__ import annotations
 
 import logging
+import re
 
 from flask import Flask, current_app, g
 from sqlalchemy import create_engine, event, text
@@ -20,6 +21,21 @@ log = logging.getLogger(__name__)
 
 _ENGINE_KEY = "pdnsadmin.engine"
 _SESSIONMAKER_KEY = "pdnsadmin.sessionmaker"
+
+#: A PostgreSQL identifier we are willing to interpolate into DDL and into the
+#: libpq `options` connect string. DB_SCHEMA comes from the environment rather
+#: than from a user, but it is the one value that reaches SQL as text rather
+#: than as a bound parameter, so it gets checked rather than trusted.
+_SCHEMA_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+
+
+def validate_schema_name(schema: str) -> str:
+    if not _SCHEMA_RE.match(schema or ""):
+        raise ValueError(
+            f"DB_SCHEMA={schema!r} is not a valid PostgreSQL identifier "
+            "(letters, digits and underscore, not starting with a digit)"
+        )
+    return schema
 
 
 def _is_postgres(url: str) -> bool:
@@ -34,6 +50,7 @@ def make_engine(url: str, schema: str) -> Engine:
     """
     kwargs: dict = {"pool_pre_ping": True, "future": True}
     if _is_postgres(url):
+        validate_schema_name(schema)
         kwargs["connect_args"] = {"options": f"-csearch_path={schema},public"}
         kwargs["pool_size"] = 5
         kwargs["max_overflow"] = 5
@@ -110,6 +127,7 @@ def create_all(app: Flask) -> None:
         # The statement runs on its own connection so a permission error cannot
         # poison the transaction that creates the tables.
         try:
+            validate_schema_name(schema)
             with engine.begin() as connection:
                 connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
         except Exception as exc:  # pragma: no cover - depends on database grants

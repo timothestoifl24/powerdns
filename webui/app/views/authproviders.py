@@ -8,7 +8,10 @@ empty secret field on save means "leave the stored value alone" rather than
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import socket
+from urllib.parse import urlparse
 
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
@@ -305,6 +308,57 @@ def test(provider_id: int):
     return redirect(url_for("authproviders.index"))
 
 
+#: Addresses the Test button must never reach. Cloud instance-metadata
+#: services live on 169.254.169.254 and hand out credentials to anything that
+#: asks, so link-local is the range that actually matters here. Loopback would
+#: expose services bound only to the container itself.
+#:
+#: Private ranges are deliberately NOT blocked: an internal Keycloak or Active
+#: Directory on 10.x or 192.168.x is the normal case for this application, and
+#: refusing them would break the deployments most likely to use it.
+_BLOCKED_NETWORKS = (
+    ipaddress.ip_network("169.254.0.0/16"),  # link-local, incl. cloud metadata
+    ipaddress.ip_network("fe80::/10"),
+    ipaddress.ip_network("127.0.0.0/8"),  # loopback
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("0.0.0.0/8"),  # "this host"
+)
+
+
+def _check_fetchable(url: str) -> str:
+    """Validate a URL the panel is about to fetch on the server's behalf.
+
+    The Test button turns an operator-supplied URL into a server-side request,
+    which is a request-forgery primitive even though only administrators can
+    reach it: the response and any error are reflected back to the browser.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ProviderConfigError(
+            f"Only http and https URLs can be tested, not {parsed.scheme or 'a relative URL'!r}."
+        )
+    host = parsed.hostname
+    if not host:
+        raise ProviderConfigError("That URL has no host.")
+
+    try:
+        resolved = socket.getaddrinfo(host, None)
+    except OSError as exc:
+        raise ProviderConfigError(f"{host} could not be resolved: {exc}") from exc
+
+    for family, _type, _proto, _canon, sockaddr in resolved:
+        if family not in (socket.AF_INET, socket.AF_INET6):
+            continue
+        address = ipaddress.ip_address(sockaddr[0])
+        for network in _BLOCKED_NETWORKS:
+            if address.version == network.version and address in network:
+                raise ProviderConfigError(
+                    f"{host} resolves to {address}, which the panel will not fetch "
+                    "(link-local and loopback addresses are blocked)."
+                )
+    return url
+
+
 def _probe(kind: str, config) -> str:
     """Reach the provider and report what came back."""
     if kind == AUTH_LDAP:
@@ -314,8 +368,17 @@ def _probe(kind: str, config) -> str:
     if kind == AUTH_OAUTH:
         import requests
 
-        url = config.discovery_url or config.authorize_url
-        response = requests.get(url, timeout=10)
+        url = _check_fetchable(config.discovery_url or config.authorize_url)
+        # Redirects are not followed: a permitted host could otherwise redirect
+        # to a blocked one, and re-validating every hop is more machinery than
+        # a test button warrants. A provider that redirects its discovery
+        # document is unusual, and the message below says what to do about it.
+        response = requests.get(url, timeout=10, allow_redirects=False)
+        if response.is_redirect:
+            raise ProviderConfigError(
+                f"that URL redirects to {response.headers.get('Location', 'elsewhere')} -- "
+                "configure the final URL instead"
+            )
         response.raise_for_status()
         if config.discovery_url:
             payload = response.json()
@@ -327,7 +390,13 @@ def _probe(kind: str, config) -> str:
             return "configuration is valid (no metadata URL to fetch)"
         import requests
 
-        response = requests.get(config.idp_metadata_url, timeout=10)
+        url = _check_fetchable(config.idp_metadata_url)
+        response = requests.get(url, timeout=10, allow_redirects=False)
+        if response.is_redirect:
+            raise ProviderConfigError(
+                f"that URL redirects to {response.headers.get('Location', 'elsewhere')} -- "
+                "configure the final URL instead"
+            )
         response.raise_for_status()
         if "EntityDescriptor" not in response.text:
             raise ProviderConfigError("that URL did not return SAML metadata")

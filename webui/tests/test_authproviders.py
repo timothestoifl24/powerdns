@@ -358,3 +358,56 @@ class TestEffectiveConfiguration:
         page = client.get("/auth/login")
         assert page.status_code == 200
         assert b"/auth/oauth/broken" not in page.data
+
+
+class TestProbeUrlGuard:
+    """The Test button turns an operator-supplied URL into a server-side
+    request, so it is a request-forgery primitive even behind admin-only
+    access: the response and any error come back to the browser."""
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://169.254.169.254/latest/meta-data/",  # cloud instance metadata
+            "https://169.254.169.254/",
+            "http://127.0.0.1:8081/api/v1/servers",  # the PowerDNS API itself
+            "http://localhost/",
+            "http://[::1]/",
+        ],
+    )
+    def test_link_local_and_loopback_are_refused(self, app, url):
+        from app.auth.store import ProviderConfigError
+        from app.views.authproviders import _check_fetchable
+
+        with app.app_context(), pytest.raises(ProviderConfigError, match="blocked"):
+            _check_fetchable(url)
+
+    @pytest.mark.parametrize("url", ["file:///etc/passwd", "gopher://x/", "ftp://x/"])
+    def test_only_http_schemes_are_allowed(self, app, url):
+        from app.auth.store import ProviderConfigError
+        from app.views.authproviders import _check_fetchable
+
+        with app.app_context(), pytest.raises(ProviderConfigError, match="http"):
+            _check_fetchable(url)
+
+    def test_a_private_address_is_allowed(self, app, monkeypatch):
+        """An internal Keycloak or AD on 10.x is the normal case here, so
+        private ranges must keep working."""
+        import socket
+
+        from app.views.authproviders import _check_fetchable
+
+        monkeypatch.setattr(
+            socket,
+            "getaddrinfo",
+            lambda *a, **k: [(socket.AF_INET, None, None, "", ("10.1.2.3", 0))],
+        )
+        with app.app_context():
+            assert _check_fetchable("https://idp.internal/metadata")
+
+    def test_an_unresolvable_host_is_reported(self, app):
+        from app.auth.store import ProviderConfigError
+        from app.views.authproviders import _check_fetchable
+
+        with app.app_context(), pytest.raises(ProviderConfigError, match="could not be resolved"):
+            _check_fetchable("https://no-such-host.invalid/metadata")

@@ -18,6 +18,7 @@ import ssl
 
 from ldap3 import ALL, AUTO_BIND_NO_TLS, SIMPLE, Connection, Server, Tls
 from ldap3.core.exceptions import LDAPException
+from ldap3.utils.conv import escape_filter_chars
 
 from ..config import AUTH_LDAP, LdapConfig
 from .provisioning import IdentityClaim
@@ -33,18 +34,14 @@ def escape_filter_value(value: str) -> str:
     """Escape a value for use inside an LDAP filter (RFC 4515).
 
     Without this, a username of ``*)(uid=admin`` rewrites the filter and can
-    authenticate as a different account. ldap3 ships an escaper, but doing it
-    explicitly keeps the guarantee visible at the call site.
+    authenticate as a different account.
+
+    This delegates to ldap3's own escaper rather than a hand-rolled table.
+    The output is identical for the RFC 4515 set, but the library's version is
+    the one static analysis recognises as a sanitizer -- a hand-rolled
+    equivalent leaves every call site looking like an unsanitized injection.
     """
-    replacements = {
-        "\\": r"\5c",
-        "*": r"\2a",
-        "(": r"\28",
-        ")": r"\29",
-        "\0": r"\00",
-        "/": r"\2f",
-    }
-    return "".join(replacements.get(char, char) for char in value)
+    return escape_filter_chars(value)
 
 
 def _build_server(config: LdapConfig) -> Server:

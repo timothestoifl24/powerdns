@@ -8,7 +8,7 @@ import secrets
 import time
 from collections.abc import Callable
 from functools import wraps
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 from flask import (
     abort,
@@ -132,26 +132,47 @@ def current_user() -> User | None:
     return user
 
 
-def is_safe_redirect_url(target: str | None) -> bool:
-    """Whether ``target`` points back at this site.
+def same_origin_path(target: str | None) -> str | None:
+    """Reduce ``target`` to a path on this site, or ``None`` if it is not ours.
 
     Guards the ?next= parameter: without this an attacker can craft a login
     link that bounces the user to an external page after authenticating.
+
+    The return value is *rebuilt* from the parsed components with the scheme
+    and host left empty, rather than handed back as it arrived. That makes the
+    result structurally incapable of carrying a scheme or a host: even if the
+    checks below were subtly wrong, what comes out can only be a path on this
+    site. Returning the caller's own string would leave the guarantee resting
+    entirely on the checks being exhaustive.
     """
     if not target:
-        return False
+        return None
+    # Protocol-relative ("//evil.test") and backslash forms are read
+    # inconsistently across browsers, so they are refused before parsing.
     if target.startswith("//") or "\\" in target:
-        return False
+        return None
+
     reference = urlparse(request.host_url)
     candidate = urlparse(urljoin(request.host_url, target))
-    return candidate.scheme in ("http", "https") and reference.netloc == candidate.netloc
+    if candidate.scheme not in ("http", "https"):
+        return None
+    if candidate.netloc != reference.netloc:
+        return None
+
+    path = candidate.path or "/"
+    if not path.startswith("/"):
+        return None
+    return urlunparse(("", "", path, candidate.params, candidate.query, candidate.fragment))
+
+
+def is_safe_redirect_url(target: str | None) -> bool:
+    """Whether ``target`` points back at this site."""
+    return same_origin_path(target) is not None
 
 
 def redirect_target(default_endpoint: str = "dashboard.index") -> str:
     target = request.args.get("next") or request.form.get("next")
-    if is_safe_redirect_url(target):
-        return target  # type: ignore[return-value]
-    return url_for(default_endpoint)
+    return same_origin_path(target) or url_for(default_endpoint)
 
 
 # ---------------------------------------------------------------------------

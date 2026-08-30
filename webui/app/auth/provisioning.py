@@ -11,6 +11,7 @@ import re
 
 from sqlalchemy import func, select
 
+from .. import audit
 from ..config import AUTH_LOCAL, GroupRoleMap
 from ..database import get_session
 from ..models import User, utcnow
@@ -117,7 +118,17 @@ def resolve_identity(claim: IdentityClaim, roles: GroupRoleMap) -> User:
             is_active=True,
         )
         db.add(user)
-        log.info("provisioned new %s user %s with role %s", claim.auth_source, username, role)
+        # Auto-creating an account is a security-relevant event, so it belongs
+        # in the audit table rather than on stderr: that table is
+        # access-controlled, queryable, and survives log rotation. commit=False
+        # lets it land in the same transaction as the user row below, so there
+        # can be no audit entry for a user that failed to save, or vice versa.
+        audit.record(
+            "user.provision",
+            target=username,
+            detail=f"source={claim.auth_source} role={role}",
+            commit=False,
+        )
     elif not user.is_active:
         raise ProvisioningError("This account has been deactivated.")
 
@@ -133,7 +144,12 @@ def resolve_identity(claim: IdentityClaim, roles: GroupRoleMap) -> User:
     if claim.display_name:
         user.display_name = claim.display_name
     if user.role != role:
-        log.info("role for %s changed from %s to %s", username, user.role, role)
+        audit.record(
+            "user.role_change",
+            target=username,
+            detail=f"{user.role} -> {role}",
+            commit=False,
+        )
         user.role = role
     user.updated_at = utcnow()
 

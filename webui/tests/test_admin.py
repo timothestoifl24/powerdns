@@ -310,6 +310,12 @@ class TestSettingsPage:
             },
         )
         settings = client.get("/admin/settings")
-        assert b"ldaps://dc.example.com" in settings.data
+        # The full configured URI, not a substring of it: "ldaps://dc.example.com"
+        # would also match a truncated or lookalike value being rendered.
+        assert (
+            b'<div class="text-secondary small font-monospace">ldaps://dc.example.com</div>'
+            in (settings.data.replace(b"\n", b"").replace(b"  ", b""))
+            or b">ldaps://dc.example.com<" in settings.data
+        )
         assert b"DNS-Admins" in settings.data
         assert b"access refused" in settings.data

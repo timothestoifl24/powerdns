@@ -26,51 +26,84 @@ log = logging.getLogger(__name__)
 
 _EXTENSION_KEY = "pdnsadmin.oauth"
 _NONCE_SESSION_KEY = "oauth_nonce"
+_FINGERPRINTS_KEY = "pdnsadmin.oauth_fingerprints"
 
 
 class OAuthError(Exception):
     """The provider refused, or answered with something unusable."""
 
 
-def init_app(app: Flask) -> None:
-    """Register every configured provider with Authlib."""
-    providers = app.config["AUTH"].oauth_providers
-    if not providers:
-        return
+def _register_kwargs(provider: OAuthProvider) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "name": provider.name,
+        "client_id": provider.client_id,
+        "client_secret": provider.client_secret,
+        "client_kwargs": {"scope": provider.scopes},
+    }
+    if provider.is_oidc:
+        kwargs["server_metadata_url"] = provider.discovery_url
+    else:
+        kwargs["authorize_url"] = provider.authorize_url
+        kwargs["access_token_url"] = provider.token_url
+        kwargs["api_base_url"] = provider.userinfo_url
+        if provider.jwks_url:
+            kwargs["jwks_uri"] = provider.jwks_url
+    return kwargs
 
-    oauth = OAuth(app)
-    for provider in providers:
-        kwargs: dict[str, Any] = {
-            "name": provider.name,
-            "client_id": provider.client_id,
-            "client_secret": provider.client_secret,
-            "client_kwargs": {"scope": provider.scopes},
-        }
-        if provider.is_oidc:
-            kwargs["server_metadata_url"] = provider.discovery_url
-        else:
-            kwargs["authorize_url"] = provider.authorize_url
-            kwargs["access_token_url"] = provider.token_url
-            kwargs["api_base_url"] = provider.userinfo_url
-            if provider.jwks_url:
-                kwargs["jwks_uri"] = provider.jwks_url
-        oauth.register(**kwargs)
+
+def _fingerprint(provider: OAuthProvider) -> tuple:
+    """Everything Authlib bakes into a client at registration time.
+
+    Providers are editable at runtime, so a cached client can be stale. This
+    is what decides whether the cached one still matches the configuration.
+    """
+    return (
+        provider.client_id,
+        provider.client_secret,
+        provider.scopes,
+        provider.discovery_url,
+        provider.authorize_url,
+        provider.token_url,
+        provider.userinfo_url,
+        provider.jwks_url,
+    )
+
+
+def init_app(app: Flask) -> None:
+    """Create the Authlib registry. Clients are registered lazily.
+
+    Providers can be added and edited through the admin UI, so binding the set
+    of clients at startup would mean a restart per change -- and, with several
+    gunicorn workers, a partially updated fleet in the meantime. Registration
+    happens on first use instead, and re-registers when the configuration
+    behind a client changes.
+    """
+    app.extensions[_EXTENSION_KEY] = OAuth(app)
+    app.extensions[_FINGERPRINTS_KEY] = {}
+
+
+def _client(provider: OAuthProvider):
+    oauth: OAuth | None = current_app.extensions.get(_EXTENSION_KEY)
+    if oauth is None:  # pragma: no cover - init_app always runs
+        raise OAuthError("The OAuth registry is not initialised.")
+
+    fingerprints: dict[str, tuple] = current_app.extensions.setdefault(_FINGERPRINTS_KEY, {})
+    current = _fingerprint(provider)
+    if fingerprints.get(provider.name) != current:
+        # Authlib caches built clients separately from the registry, so the
+        # cached one has to go or re-registering has no effect.
+        oauth._clients.pop(provider.name, None)  # noqa: SLF001
+        oauth.register(**_register_kwargs(provider))
+        fingerprints[provider.name] = current
         log.info(
             "registered OAuth provider %s (%s)",
             provider.name,
             "OpenID Connect" if provider.is_oidc else "OAuth 2.0",
         )
 
-    app.extensions[_EXTENSION_KEY] = oauth
-
-
-def _client(provider: OAuthProvider):
-    oauth: OAuth | None = current_app.extensions.get(_EXTENSION_KEY)
-    if oauth is None:
-        raise OAuthError("No OAuth providers are configured.")
     client = oauth.create_client(provider.name)
-    if client is None:
-        raise OAuthError(f"OAuth provider {provider.name!r} is not registered.")
+    if client is None:  # pragma: no cover - we just registered it
+        raise OAuthError(f"OAuth provider {provider.name!r} could not be built.")
     return client
 
 

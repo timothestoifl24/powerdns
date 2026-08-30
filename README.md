@@ -103,10 +103,47 @@ Grants for the `user` role are managed per account under
 Backends can be combined. With local and LDAP both on, the sign-in form tries
 the local account first and falls back to the directory.
 
-Everything is configured in `.env`; `.env.example` documents every key with a
-worked example. The **Administration → Settings** page shows what is actually
-active, including the group-to-role mapping and the exact redirect URL to
-register with each provider.
+Providers can be configured two ways, and both can be used at once:
+
+* **In the web UI**, under **Administration → Sign-in providers**. Add, edit,
+  test and disable providers without a restart or a redeploy.
+* **In `.env`**, which `.env.example` documents with a worked example for each
+  kind. This is what a configuration-as-code deployment wants.
+
+**The environment always wins.** A provider declared in `.env` cannot be
+overridden from the UI: it is listed there as read-only, and a database entry
+that collides with it is ignored and labelled *Shadowed* rather than silently
+applied. So adopting the UI never puts your committed configuration at the
+mercy of whoever holds an administrator account.
+
+### Configuring providers in the web UI
+
+**Administration → Sign-in providers** manages LDAP, OAuth/OpenID Connect and
+SAML providers. Each one has a **Test** button that contacts the provider
+straight away -- binding to the directory, reading the OIDC discovery document,
+or fetching the IdP metadata -- so a new provider is verified without asking
+someone to attempt a sign-in and interpret the failure.
+
+Configuration is validated at save time, not at sign-in: a provider missing its
+token URL, base DN or IdP certificate is refused with the reason.
+
+A few properties are worth knowing:
+
+* **Secrets are encrypted before they are stored**, with a key derived from
+  `SECRET_KEY` using HKDF. A database dump, replica or backup does not hand
+  over your client secrets and bind passwords. The trade-off is that **changing
+  `SECRET_KEY` makes stored secrets unreadable** -- the panel says so plainly
+  and each secret has to be entered again.
+* **Secrets are write-only from the browser.** They are never rendered back
+  into a form. An empty secret field on save means "keep the stored value", so
+  correcting a URL does not require having the password to hand; an explicit
+  *Clear* checkbox is the only way to remove one.
+* **One broken provider cannot take sign-in down.** A provider that fails to
+  build is skipped with a log line, and the login page still renders.
+* Every change is written to the audit log.
+
+Providers are read per request, so a change takes effect immediately across
+every gunicorn worker without a restart.
 
 ### Local accounts
 
@@ -388,6 +425,10 @@ register.
 - Every change made through the panel is written to an append-only audit log,
   visible under **Administration → Audit log**. Entries survive deletion of
   the user who made them.
+- **Provider secrets are encrypted at rest** with a key derived from
+  `SECRET_KEY`, so the `auth_providers` table does not expose OAuth client
+  secrets, LDAP bind passwords or SAML private keys to anyone holding a
+  database dump. Rotating `SECRET_KEY` invalidates them by design.
 - **No application role is a superuser.** `POSTGRES_USER` names a bootstrap
   role that exists only to run `initdb` and the scripts in
   `/docker-entrypoint-initdb.d`; nothing connects as it afterwards. PowerDNS

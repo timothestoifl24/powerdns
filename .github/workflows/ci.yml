@@ -129,18 +129,41 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update && sudo apt-get install -y dnsutils
-          key=$(cat secrets/pdns_api_key)
 
-          docker compose exec -T pdns curl -fsS -X POST \
-            -H "X-API-Key: $key" -H 'Content-Type: application/json' \
-            http://127.0.0.1:8081/api/v1/servers/localhost/zones \
-            -d '{"name":"smoke.test.","kind":"Native","nameservers":["ns1.smoke.test."]}'
+          # Driven from the webui container: it is the one that talks to the
+          # API in production, so this exercises the real internal path. The
+          # pdns image ships no HTTP client, by design.
+          docker compose exec -T webui python - "$(cat secrets/pdns_api_key)" <<'PY'
+          import json, sys, urllib.request
 
-          docker compose exec -T pdns curl -fsS -X PATCH \
-            -H "X-API-Key: $key" -H 'Content-Type: application/json' \
-            http://127.0.0.1:8081/api/v1/servers/localhost/zones/smoke.test. \
-            -d '{"rrsets":[{"name":"www.smoke.test.","type":"A","ttl":60,"changetype":"REPLACE",
-                 "records":[{"content":"192.0.2.42","disabled":false}]}]}'
+          key = sys.argv[1]
+
+          def call(method, path, body=None):
+              request = urllib.request.Request(
+                  "http://pdns:8081/api/v1" + path,
+                  method=method,
+                  data=json.dumps(body).encode() if body is not None else None,
+                  headers={"X-API-Key": key, "Content-Type": "application/json"},
+              )
+              with urllib.request.urlopen(request, timeout=15) as response:
+                  print(method, path, "->", response.status)
+                  return response.status
+
+          call("POST", "/servers/localhost/zones", {
+              "name": "smoke.test.",
+              "kind": "Native",
+              "nameservers": ["ns1.smoke.test."],
+          })
+          call("PATCH", "/servers/localhost/zones/smoke.test.", {
+              "rrsets": [{
+                  "name": "www.smoke.test.",
+                  "type": "A",
+                  "ttl": 60,
+                  "changetype": "REPLACE",
+                  "records": [{"content": "192.0.2.42", "disabled": False}],
+              }]
+          })
+          PY
 
           # The real test: PowerDNS reads it back out of PostgreSQL and answers
           # a query on port 53.
@@ -148,22 +171,34 @@ jobs:
           echo "dig returned: $answer"
           [ "$answer" = "192.0.2.42" ] || { echo "unexpected answer" >&2; exit 1; }
 
-      - name: The first-run administrator can sign in
+      - name: The zone shows up in the panel for the administrator
         run: |
           set -euo pipefail
-          password=$(cat secrets/webui_admin_password)
           jar=$(mktemp)
           token=$(curl -fsS -c "$jar" http://localhost:9191/auth/login \
                   | grep -o 'name="csrf_token" value="[^"]*"' | head -1 | cut -d'"' -f4)
-          code=$(curl -fsS -b "$jar" -c "$jar" -o /tmp/login.html -w '%{http_code}' \
+          curl -fsS -b "$jar" -c "$jar" -o /dev/null \
+            -X POST http://localhost:9191/auth/login \
+            --data-urlencode "username=admin" \
+            --data-urlencode "password=$(cat secrets/webui_admin_password)" \
+            --data-urlencode "csrf_token=$token"
+          curl -fsS -b "$jar" http://localhost:9191/zones/ | grep -q "smoke.test."
+          # And the record editor renders the record we just created.
+          curl -fsS -b "$jar" "http://localhost:9191/zones/smoke.test." | grep -q "192.0.2.42"
+
+      - name: A wrong password is refused
+        run: |
+          set -euo pipefail
+          jar=$(mktemp)
+          token=$(curl -fsS -c "$jar" http://localhost:9191/auth/login \
+                  | grep -o 'name="csrf_token" value="[^"]*"' | head -1 | cut -d'"' -f4)
+          code=$(curl -s -b "$jar" -o /dev/null -w '%{http_code}' \
                  -X POST http://localhost:9191/auth/login \
                  --data-urlencode "username=admin" \
-                 --data-urlencode "password=$password" \
+                 --data-urlencode "password=definitely-not-the-password" \
                  --data-urlencode "csrf_token=$token")
-          echo "login returned $code"
-          [ "$code" = "302" ] || { cat /tmp/login.html; exit 1; }
-          # The session cookie must now reach an authenticated page.
-          curl -fsS -b "$jar" http://localhost:9191/ | grep -q "Dashboard"
+          echo "bad password returned $code"
+          [ "$code" = "401" ] || exit 1
 
       - name: A request without a CSRF token is rejected
         run: |

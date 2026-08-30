@@ -12,5 +12,9 @@
   },
   "devDependencies": {
     "vitepress": "^1.6.4"
-  }
+  },
+  "overrides": {
+    "vite": "^6.4.3"
+  },
+  "_overridesNote": "vitepress 1.6.4 is the latest stable and depends on vite ^5.4.14, but every vite 5.x carries GHSA-4w7w-66w2-5vf9, GHSA-fx2h-pf6j-xcff and GHSA-v6wh-96g9-6wx3, and pins esbuild ^0.21.3 which carries GHSA-67mh-4wv8-2f99. npm reports fixAvailable:false because no stable vitepress pulls a fixed vite. Forcing vite to 6.4.3 also lifts esbuild to 0.25.x and clears all four; the site builds and the dev server runs. Remove this once vitepress 2.x is stable."
 }

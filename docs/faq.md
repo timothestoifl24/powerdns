@@ -125,10 +125,13 @@ need its SQLAlchemy URL changed. Nobody has done it, so treat it as unsupported.
 
 ### Why not MongoDB?
 
-There is no supported MongoDB backend for PowerDNS — the in-tree one was removed
-in 2013 — and the workload is exact-match point lookups, which is precisely where
-a document store offers nothing. The long version is on
-[its own page](/database-choice).
+There is no supported MongoDB backend for PowerDNS: the in-tree one was removed
+in 2013 and never replaced, so the only route would be the `remote` backend —
+a second daemon of your own in the hot path of every query, re-implementing the
+DNSSEC ordering callbacks. And the workload would not reward it. PowerDNS does
+exact-match point lookups plus one ordered range scan on `ordername`; there are
+no joins, no aggregations and no nested documents, which is precisely where a
+document store offers nothing a B-tree index does not already give you.
 
 ### Can I run several nameservers from this?
 

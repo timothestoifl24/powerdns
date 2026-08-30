@@ -11,6 +11,10 @@ export default defineConfig({
   lastUpdated: true,
   sitemap: { hostname: 'https://powerdns.stoifl.app' },
 
+  // Kept in the repository for contributors, deliberately not published: it is
+  // an internal design rationale, not something a user of the stack needs.
+  srcExclude: ['database-choice.md'],
+
   // The panel's own URLs are meant to be unreachable from a build machine.
   ignoreDeadLinks: [/^https?:\/\/(localhost|127\.0\.0\.1)/],
 
@@ -43,7 +47,6 @@ export default defineConfig({
           { text: 'Advanced configuration', link: '/advanced-config' },
           { text: 'Upgrading', link: '/upgrading' },
           { text: 'FAQ', link: '/faq' },
-          { text: 'Why PostgreSQL', link: '/database-choice' },
         ],
       },
       { text: 'ghcr.io images', link: 'https://github.com/timothestoifl24?tab=packages' },
@@ -66,10 +69,6 @@ export default defineConfig({
           { text: 'Upgrading', link: '/upgrading' },
           { text: 'FAQ', link: '/faq' },
         ],
-      },
-      {
-        text: 'Background',
-        items: [{ text: 'Why PostgreSQL, not MongoDB', link: '/database-choice' }],
       },
     ],
 

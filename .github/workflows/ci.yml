@@ -53,9 +53,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: ShellCheck
         run: |
+          set -euo pipefail
           sudo apt-get update && sudo apt-get install -y shellcheck
-          shellcheck pdns/entrypoint.sh webui/entrypoint.sh \
-                     scripts/generate-secrets.sh db/initdb/02-admin-schema.sh
+          # Discovered rather than listed: a hardcoded list silently goes stale
+          # when a script is renamed, and fails the build when one is removed.
+          mapfile -t scripts < <(git ls-files '*.sh')
+          if [ "${#scripts[@]}" -eq 0 ]; then
+            echo "no shell scripts found -- the glob is wrong" >&2
+            exit 1
+          fi
+          printf 'checking %s\n' "${scripts[@]}"
+          shellcheck "${scripts[@]}"
 
   smoke:
     name: End-to-end compose smoke test

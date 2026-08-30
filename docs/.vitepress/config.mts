@@ -43,7 +43,6 @@ export default defineConfig({
           { text: 'Advanced configuration', link: '/advanced-config' },
           { text: 'Upgrading', link: '/upgrading' },
           { text: 'FAQ', link: '/faq' },
-          { text: 'Why PostgreSQL', link: '/database-choice' },
         ],
       },
       { text: 'ghcr.io images', link: 'https://github.com/timothestoifl24?tab=packages' },
@@ -66,10 +65,6 @@ export default defineConfig({
           { text: 'Upgrading', link: '/upgrading' },
           { text: 'FAQ', link: '/faq' },
         ],
-      },
-      {
-        text: 'Background',
-        items: [{ text: 'Why PostgreSQL, not MongoDB', link: '/database-choice' }],
       },
     ],
 

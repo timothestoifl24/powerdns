@@ -303,5 +303,3 @@ to provide.
 
 - [Setup](/setup) — first install, reverse proxy, port conflicts.
 - [Upgrading](/upgrading) — what happens to the schema when you pull new images.
-- [Why PostgreSQL, not MongoDB](/database-choice) — the reasoning behind the
-  storage choice.

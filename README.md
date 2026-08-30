@@ -4,6 +4,8 @@ An authoritative DNS server you can run with one command, backed by PostgreSQL,
 with a web admin panel themed with [Tabler](https://tabler.io) that supports
 local accounts, LDAP / Active Directory, OAuth 2.0 / OpenID Connect and SAML 2.0.
 
+**Documentation, with screenshots: <https://powerdns.stoifl.app>**
+
 ```
 ┌──────────────┐        HTTP API         ┌──────────────┐
 │    webui     │ ──────────────────────► │     pdns     │  :53 tcp/udp
@@ -353,6 +355,23 @@ python -m app.cli init && flask --app wsgi:application run --debug
 
 (The compose file does not publish 5432 or 8081 to the host; add the ports
 temporarily if you want to develop this way.)
+
+### The documentation site
+
+`docs/` is a [VitePress](https://vitepress.dev) site, published to
+<https://powerdns.stoifl.app> by `.github/workflows/docs.yml` on every push to
+`main`.
+
+```bash
+cd docs
+npm install
+npm run dev            # http://localhost:5173
+npm run build          # output in docs/.vitepress/dist
+```
+
+The screenshots are captured from a running stack by
+`docs/scripts/capture-screenshots.mjs`; see the *Regenerating these* section of
+the screenshots page for the command.
 
 ## Troubleshooting
 

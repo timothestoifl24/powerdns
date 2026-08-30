@@ -117,6 +117,31 @@ class TestRrset:
         )
         assert any("already has a CNAME" in problem for problem in problems)
 
+    def test_soa_must_sit_at_the_apex(self):
+        problems = validate_rrset(
+            "sub.example.com.",
+            "SOA",
+            ["ns1.example.com. hostmaster.example.com. 1 10800 3600 604800 3600"],
+            "example.com.",
+        )
+        assert any("zone apex" in problem for problem in problems)
+
+    def test_soa_at_the_apex_is_fine(self):
+        assert (
+            validate_rrset(
+                "example.com.",
+                "SOA",
+                ["ns1.example.com. hostmaster.example.com. 1 10800 3600 604800 3600"],
+                "example.com.",
+            )
+            == []
+        )
+
+    def test_only_one_soa(self):
+        soa = "ns1.example.com. hostmaster.example.com. 1 10800 3600 604800 3600"
+        problems = validate_rrset("example.com.", "SOA", [soa, soa], "example.com.")
+        assert any("exactly one SOA" in problem for problem in problems)
+
     def test_dnssec_types_do_not_block_a_cname(self):
         """RRSIG and NSEC coexist with a CNAME by design."""
         problems = validate_rrset(

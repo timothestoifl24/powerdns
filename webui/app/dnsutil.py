@@ -96,6 +96,17 @@ def validate_rrset(
     if name_c and zone_c and name_c != zone_c and not name_c.endswith("." + zone_c):
         problems.append(f"{name_c.rstrip('.')} does not belong to the zone {zone_c.rstrip('.')}.")
 
+    if rtype == "SOA":
+        if len(contents) > 1:
+            problems.append("A zone has exactly one SOA record.")
+        if name_c and zone_c and name_c != zone_c:
+            # The UI does not offer this, but the form can still be posted by
+            # hand, and an SOA below the apex is not a valid zone.
+            problems.append(
+                f"The SOA record belongs at the zone apex ({zone_c.rstrip('.')}), "
+                f"not at {name_c.rstrip('.')}."
+            )
+
     if rtype == "CNAME":
         if len(contents) > 1:
             problems.append("A name can have only one CNAME record.")

@@ -64,13 +64,28 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Generate secrets and .env
-        run: ./scripts/generate-secrets.sh
+        run: |
+          set -euo pipefail
+          ./scripts/generate-secrets.sh
+          # systemd-resolved holds :53 on GitHub runners, so publish DNS
+          # somewhere free. The container still serves on 53 internally.
+          {
+            echo 'DNS_BIND_ADDRESS=127.0.0.1'
+            echo 'DNS_PORT=5353'
+          } >> .env
 
       - name: Build images
         run: docker compose build
 
       - name: Start the stack
-        run: docker compose up -d
+        run: |
+          set -euo pipefail
+          if ! docker compose up -d; then
+            echo "::error::docker compose up failed"
+            docker compose ps -a
+            docker compose logs --tail 100
+            exit 1
+          fi
 
       - name: Wait for every service to report healthy
         run: |
@@ -167,7 +182,7 @@ jobs:
 
           # The real test: PowerDNS reads it back out of PostgreSQL and answers
           # a query on port 53.
-          answer=$(dig +short @127.0.0.1 www.smoke.test A)
+          answer=$(dig +short @127.0.0.1 -p 5353 www.smoke.test A)
           echo "dig returned: $answer"
           [ "$answer" = "192.0.2.42" ] || { echo "unexpected answer" >&2; exit 1; }
 

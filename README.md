@@ -41,8 +41,11 @@ script printed. Change it under **My profile** straight away.
 Check that DNS is actually answering:
 
 ```bash
-dig @127.0.0.1 -p 53 example.com SOA
+dig @127.0.0.1 example.com SOA
 ```
+
+If `docker compose up` reports that port 53 is already in use, a local resolver
+has it — see [Troubleshooting](#troubleshooting).
 
 ### What the script created
 
@@ -295,6 +298,21 @@ docker compose down -v && docker compose up -d --build
 
 `down -v` deletes the volume, and with it every zone. On a system with real
 data, dump the database first.
+
+**`failed to bind host port for 0.0.0.0:53: address already in use`.**
+Something already listens on port 53 — on most Ubuntu and Fedora systems that
+is `systemd-resolved`, which binds `127.0.0.53:53`. Either publish DNS on a
+different host port:
+
+```bash
+echo 'DNS_PORT=5353' >> .env
+docker compose up -d
+dig @127.0.0.1 -p 5353 example.com SOA
+```
+
+or free port 53 by disabling the stub listener (`DNSStubListener=no` in
+`/etc/systemd/resolved.conf`, then `systemctl restart systemd-resolved`). The
+container always serves on 53 internally; `DNS_PORT` only affects the host side.
 
 **Login appears to succeed but bounces straight back to the sign-in page.**
 `SESSION_COOKIE_SECURE=true` over plain HTTP: the browser never sends the

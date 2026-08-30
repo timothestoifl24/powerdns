@@ -59,8 +59,10 @@ services:
     ports:
       # The DNS service itself. The API on 8081 is deliberately NOT published:
       # only the webui container needs it, over the internal network.
-      - "${DNS_BIND_ADDRESS:-0.0.0.0}:53:53/tcp"
-      - "${DNS_BIND_ADDRESS:-0.0.0.0}:53:53/udp"
+      # Many Linux hosts already run a resolver on 53 (systemd-resolved binds
+      # 127.0.0.53:53); set DNS_PORT to something else there.
+      - "${DNS_BIND_ADDRESS:-0.0.0.0}:${DNS_PORT:-53}:53/tcp"
+      - "${DNS_BIND_ADDRESS:-0.0.0.0}:${DNS_PORT:-53}:53/udp"
     depends_on:
       db:
         condition: service_healthy

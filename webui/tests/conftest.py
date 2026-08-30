@@ -63,6 +63,7 @@ def pdns(monkeypatch) -> FakePowerDNS:
     """
     fake = FakePowerDNS(api_key=API_KEY)
 
+    import app as app_package
     from app.pdns import PdnsClient
     from app.views import admin as admin_views
     from app.views import dashboard as dashboard_views
@@ -77,8 +78,9 @@ def pdns(monkeypatch) -> FakePowerDNS:
             session=fake,
         )
 
-    # The views import the factory by name, so each namespace needs patching.
-    for module in (zones_views, dashboard_views, admin_views):
+    # The factory is imported by name into each namespace that uses it, so each
+    # one needs patching -- including the app package, where /readyz lives.
+    for module in (app_package, zones_views, dashboard_views, admin_views):
         monkeypatch.setattr(module, "client_from_config", factory)
 
     fake.client_factory = factory

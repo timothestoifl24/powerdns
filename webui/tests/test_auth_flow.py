@@ -223,3 +223,78 @@ class TestLdapFilterEscaping:
         # The injected parentheses must not appear as filter syntax.
         assert built == r"(&(objectClass=person)(uid=\2a\29\28uid=admin))"
         assert built.count("(") == 3
+
+
+class TestProvisioningIsAudited:
+    """Auto-creating an account and changing a role are security-relevant
+    events, so they belong in the audit table rather than on stderr: it is
+    access-controlled, queryable, and survives log rotation."""
+
+    @staticmethod
+    def _entries(action: str):
+        from sqlalchemy import select
+
+        from app.database import get_session
+        from app.models import AuditLog
+
+        return list(get_session().scalars(select(AuditLog).filter(AuditLog.action == action)))
+
+    def test_creating_an_account_writes_an_audit_entry(self, app):
+        claim = IdentityClaim(
+            username="newperson",
+            auth_source=AUTH_OAUTH,
+            provider="keycloak",
+            external_id="sub-9",
+            groups=["dns-admins"],
+        )
+        with app.test_request_context():
+            resolve_identity(claim, GroupRoleMap(admin_groups=("dns-admins",)))
+            entries = self._entries("user.provision")
+            assert len(entries) == 1
+            assert entries[0].target == "newperson"
+            assert "role=admin" in entries[0].detail
+            assert f"source={AUTH_OAUTH}" in entries[0].detail
+
+    def test_a_returning_user_is_not_provisioned_twice(self, app):
+        claim = IdentityClaim("repeat", AUTH_OAUTH, "kc", "sub-10", groups=["staff"])
+        roles = GroupRoleMap(default_role=ROLE_USER)
+        with app.test_request_context():
+            resolve_identity(claim, roles)
+            resolve_identity(claim, roles)
+            assert len(self._entries("user.provision")) == 1
+
+    def test_a_role_change_is_audited_with_both_roles(self, app):
+        roles_admin = GroupRoleMap(admin_groups=("dns-admins",), default_role=ROLE_USER)
+        with app.test_request_context():
+            resolve_identity(
+                IdentityClaim("mover", AUTH_OAUTH, "kc", "sub-11", groups=["staff"]), roles_admin
+            )
+            resolve_identity(
+                IdentityClaim("mover", AUTH_OAUTH, "kc", "sub-11", groups=["dns-admins"]),
+                roles_admin,
+            )
+            entries = self._entries("user.role_change")
+            assert len(entries) == 1
+            assert entries[0].detail == "user -> admin"
+            assert entries[0].target == "mover"
+
+    def test_the_audit_entry_commits_with_the_user(self, app):
+        """commit=False means both land in one transaction: there must be no
+        audit entry for a user that failed to save, nor a user with no entry."""
+        from sqlalchemy import select
+
+        from app.database import get_session
+        from app.models import AuditLog, User
+
+        claim = IdentityClaim("atomic", AUTH_OAUTH, "kc", "sub-12", groups=["staff"])
+        with app.test_request_context():
+            resolve_identity(claim, GroupRoleMap(default_role=ROLE_USER))
+
+        with app.app_context():
+            session = get_session()
+            user = session.scalars(select(User).filter(User.username == "atomic")).first()
+            entry = session.scalars(
+                select(AuditLog).filter(AuditLog.action == "user.provision")
+            ).first()
+            assert user is not None, "the user was not committed"
+            assert entry is not None, "the audit entry was not committed"

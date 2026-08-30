@@ -1,0 +1,228 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev, 'claude/**']
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: webui/requirements.txt
+
+      - name: Install dependencies
+        working-directory: webui
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov ruff
+
+      - name: Lint
+        working-directory: webui
+        run: ruff check app tests
+
+      - name: Check formatting
+        working-directory: webui
+        run: ruff format --check app tests
+
+      - name: Run tests
+        working-directory: webui
+        run: pytest --cov=app --cov-report=term-missing
+
+  shellcheck:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ShellCheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck pdns/entrypoint.sh webui/entrypoint.sh \
+                     scripts/generate-secrets.sh db/initdb/02-admin-schema.sh
+
+  smoke:
+    name: End-to-end compose smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate secrets and .env
+        run: ./scripts/generate-secrets.sh
+
+      - name: Build images
+        run: docker compose build
+
+      - name: Start the stack
+        run: docker compose up -d
+
+      - name: Wait for every service to report healthy
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            unhealthy=""
+            for service in db pdns webui; do
+              id=$(docker compose ps -q "$service")
+              if [ -z "$id" ]; then unhealthy="$unhealthy $service(missing)"; continue; fi
+              state=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$id")
+              [ "$state" = "healthy" ] || [ "$state" = "running" ] || unhealthy="$unhealthy $service($state)"
+            done
+            if [ -z "$unhealthy" ]; then echo "all services are up"; exit 0; fi
+            echo "waiting for:$unhealthy"
+            sleep 5
+          done
+          echo "services did not become healthy in time" >&2
+          docker compose ps
+          docker compose logs --tail 100
+          exit 1
+
+      - name: PowerDNS loaded the gpgsql schema
+        run: |
+          set -euo pipefail
+          # An empty list is the correct answer; an error means the schema or
+          # the database credentials are wrong.
+          docker compose exec -T db psql -U pdns -d pdns -c '\dt' | tee /tmp/tables.txt
+          for table in domains records cryptokeys domainmetadata tsigkeys comments supermasters; do
+            grep -q " $table " /tmp/tables.txt || { echo "missing table: $table" >&2; exit 1; }
+          done
+
+      - name: The admin panel's schema is separate from PowerDNS's
+        run: |
+          set -euo pipefail
+          docker compose exec -T db psql -U pdns -d pdns -c \
+            "SELECT table_name FROM information_schema.tables WHERE table_schema='pdnsadmin' ORDER BY 1" \
+            | tee /tmp/admin_tables.txt
+          for table in users zone_access audit_log app_settings; do
+            grep -q "$table" /tmp/admin_tables.txt || { echo "missing table: $table" >&2; exit 1; }
+          done
+
+      - name: The web UI answers and serves the Tabler theme
+        run: |
+          set -euo pipefail
+          curl -fsS http://localhost:9191/healthz | tee /dev/stderr | grep -q '"status": *"ok"'
+          # readyz proves the panel reached both PostgreSQL and the PowerDNS API.
+          curl -fsS http://localhost:9191/readyz | tee /dev/stderr | grep -q '"powerdns": *true'
+          curl -fsS http://localhost:9191/auth/login | grep -q "Sign in to your account"
+          # Vendored at build time, so this must be served from our own origin.
+          curl -fsS -o /dev/null -w '%{http_code}\n' \
+            http://localhost:9191/static/vendor/tabler/tabler.min.css | grep -q 200
+          curl -fsS -o /dev/null -w '%{http_code}\n' \
+            http://localhost:9191/static/vendor/tabler/fonts/tabler-icons.woff2 | grep -q 200
+
+      - name: Create a zone through the API and resolve it over real DNS
+        run: |
+          set -euo pipefail
+          sudo apt-get update && sudo apt-get install -y dnsutils
+          key=$(cat secrets/pdns_api_key)
+
+          docker compose exec -T pdns curl -fsS -X POST \
+            -H "X-API-Key: $key" -H 'Content-Type: application/json' \
+            http://127.0.0.1:8081/api/v1/servers/localhost/zones \
+            -d '{"name":"smoke.test.","kind":"Native","nameservers":["ns1.smoke.test."]}'
+
+          docker compose exec -T pdns curl -fsS -X PATCH \
+            -H "X-API-Key: $key" -H 'Content-Type: application/json' \
+            http://127.0.0.1:8081/api/v1/servers/localhost/zones/smoke.test. \
+            -d '{"rrsets":[{"name":"www.smoke.test.","type":"A","ttl":60,"changetype":"REPLACE",
+                 "records":[{"content":"192.0.2.42","disabled":false}]}]}'
+
+          # The real test: PowerDNS reads it back out of PostgreSQL and answers
+          # a query on port 53.
+          answer=$(dig +short @127.0.0.1 www.smoke.test A)
+          echo "dig returned: $answer"
+          [ "$answer" = "192.0.2.42" ] || { echo "unexpected answer" >&2; exit 1; }
+
+      - name: The first-run administrator can sign in
+        run: |
+          set -euo pipefail
+          password=$(cat secrets/webui_admin_password)
+          jar=$(mktemp)
+          token=$(curl -fsS -c "$jar" http://localhost:9191/auth/login \
+                  | grep -o 'name="csrf_token" value="[^"]*"' | head -1 | cut -d'"' -f4)
+          code=$(curl -fsS -b "$jar" -c "$jar" -o /tmp/login.html -w '%{http_code}' \
+                 -X POST http://localhost:9191/auth/login \
+                 --data-urlencode "username=admin" \
+                 --data-urlencode "password=$password" \
+                 --data-urlencode "csrf_token=$token")
+          echo "login returned $code"
+          [ "$code" = "302" ] || { cat /tmp/login.html; exit 1; }
+          # The session cookie must now reach an authenticated page.
+          curl -fsS -b "$jar" http://localhost:9191/ | grep -q "Dashboard"
+
+      - name: A request without a CSRF token is rejected
+        run: |
+          set -euo pipefail
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+                 http://localhost:9191/auth/login -d 'username=admin&password=x')
+          echo "unprotected POST returned $code"
+          [ "$code" = "400" ] || exit 1
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs --tail 200
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  publish:
+    name: Build and push images
+    runs-on: ubuntu-latest
+    needs: [test, shellcheck, smoke]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - context: ./pdns
+            image: pdns
+          - context: ./db
+            image: pdns-db
+          - context: ./webui
+            image: pdns-webui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=ref,event=branch
+            type=sha,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

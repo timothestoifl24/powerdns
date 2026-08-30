@@ -12,7 +12,7 @@ chmod 0700 "$SECRETS_DIR"
 random() { LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "${1:-48}"; }
 
 create() {
-  local name="$1" length="${2:-48}" path="$SECRETS_DIR/$1"
+  local length="${2:-48}" path="$SECRETS_DIR/$1"
   if [ -s "$path" ]; then
     echo "  keep   $path"
     return
@@ -37,9 +37,14 @@ else
   echo "  keep   .env"
 fi
 
+admin_user="$(sed -n 's/^BOOTSTRAP_ADMIN_USERNAME=//p' .env 2>/dev/null | tr -d '"' | head -1)"
+
 echo
 echo "Initial administrator login:"
-echo "  username: $(grep -E '^BOOTSTRAP_ADMIN_USERNAME=' .env 2>/dev/null | cut -d= -f2- | tr -d '"' || true)"
+echo "  username: ${admin_user:-admin}"
 echo "  password: $(cat "$SECRETS_DIR/webui_admin_password")"
+echo
+echo "Change this password after the first sign-in. The file stays on disk so"
+echo "you can look it up again, but it is only used while no users exist."
 echo
 echo "Next: docker compose up -d --build"

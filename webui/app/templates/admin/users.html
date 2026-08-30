@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Users · {{ site_name }}{% endblock %}
+{% block header_pretitle %}Administration{% endblock %}
+{% block header_title %}Users{% endblock %}
+{% block header_actions %}
+  <a href="{{ url_for('admin.create_user') }}" class="btn btn-primary">
+    <i class="ti ti-user-plus me-2"></i>New local user
+  </a>
+{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div class="table-responsive">
+      <table class="table card-table table-vcenter table-hover">
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Source</th>
+            <th>Role</th>
+            <th>Zones</th>
+            <th>Last sign-in</th>
+            <th class="w-1"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for user in users %}
+            <tr class="{{ 'opacity-50' if not user.is_active }}">
+              <td>
+                <div class="d-flex align-items-center">
+                  <span class="avatar avatar-sm me-2 bg-primary-lt">{{ user.initials }}</span>
+                  <div>
+                    <div class="fw-medium">{{ user.username }}</div>
+                    {% if user.display_name or user.email %}
+                      <div class="text-secondary small">
+                        {{ user.display_name }}{% if user.email %} · {{ user.email }}{% endif %}
+                      </div>
+                    {% endif %}
+                  </div>
+                </div>
+              </td>
+              <td>
+                {% set source_icons = {'local': 'ti-user', 'ldap': 'ti-server',
+                                       'oauth': 'ti-key', 'saml': 'ti-shield-lock'} %}
+                <span class="badge bg-secondary-lt">
+                  <i class="ti {{ source_icons.get(user.auth_source, 'ti-user') }} me-1"></i>
+                  {{ user.auth_provider or user.auth_source }}
+                </span>
+              </td>
+              <td>
+                {% set role_colours = {'admin': 'bg-red-lt', 'operator': 'bg-blue-lt',
+                                       'user': 'bg-secondary-lt'} %}
+                <span class="badge {{ role_colours.get(user.role, 'bg-secondary-lt') }}">
+                  {{ user.role }}
+                </span>
+                {% if not user.is_active %}
+                  <span class="badge bg-secondary-lt ms-1">disabled</span>
+                {% endif %}
+              </td>
+              <td class="text-secondary">
+                {% if user.is_operator %}
+                  <span title="Operators and administrators see every zone">all</span>
+                {% else %}
+                  {{ user.zone_grants | length }}
+                {% endif %}
+              </td>
+              <td class="text-secondary">
+                {{ user.last_login_at | datetime if user.last_login_at else 'never' }}
+              </td>
+              <td>
+                <a href="{{ url_for('admin.edit_user', user_id=user.id) }}" class="btn btn-sm">
+                  Manage
+                </a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card mt-3">
+    <div class="card-header"><h3 class="card-title">What the roles mean</h3></div>
+    <div class="card-body">
+      <div class="row g-3">
+        {% for role, description in role_descriptions.items() %}
+          <div class="col-md-4">
+            <div class="subheader mb-1">{{ role }}</div>
+            <div class="text-secondary">{{ description }}</div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+{% endblock %}

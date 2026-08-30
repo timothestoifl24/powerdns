@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · {{ site_name }}{% endblock %}
+{% block header_pretitle %}Overview{% endblock %}
+{% block header_title %}Dashboard{% endblock %}
+{% block header_actions %}
+  {% if current_user.is_operator %}
+    <a href="{{ url_for('zones.create') }}" class="btn btn-primary d-none d-sm-inline-flex">
+      <i class="ti ti-plus me-2"></i>New zone
+    </a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  {% if error %}
+    <div class="alert alert-danger" role="alert">
+      <div class="d-flex">
+        <div class="me-2"><i class="ti ti-plug-connected-x"></i></div>
+        <div>
+          <h4 class="alert-title">PowerDNS is not reachable</h4>
+          <div class="text-secondary">{{ error }}</div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="row row-deck row-cards mb-3">
+    <div class="col-sm-6 col-lg-3">
+      <div class="card">
+        <div class="card-body">
+          <div class="d-flex align-items-center">
+            <div class="subheader">Zones</div>
+          </div>
+          <div class="h1 mb-0 mt-1">{{ zone_count }}</div>
+          {% if not current_user.is_operator and total_zone_count != zone_count %}
+            <div class="text-secondary small mt-1">of {{ total_zone_count }} on this server</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <div class="card">
+        <div class="card-body">
+          <div class="subheader">DNSSEC signed</div>
+          <div class="h1 mb-0 mt-1">{{ dnssec_count }}</div>
+          <div class="text-secondary small mt-1">
+            {{ (zone_count - dnssec_count) }} unsigned
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <div class="card">
+        <div class="card-body">
+          <div class="subheader">Server</div>
+          <div class="h3 mb-0 mt-1">
+            {% if error %}
+              <span class="text-danger"><i class="ti ti-x me-1"></i>Offline</span>
+            {% else %}
+              <span class="text-success"><i class="ti ti-check me-1"></i>Online</span>
+            {% endif %}
+          </div>
+          <div class="text-secondary small mt-1">{{ server.version | default('unknown') }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+      <div class="card">
+        <div class="card-body">
+          <div class="subheader">Your role</div>
+          <div class="h3 mb-0 mt-1">{{ current_user.role | capitalize }}</div>
+          <div class="text-secondary small mt-1">
+            signed in via {{ current_user.auth_source }}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row row-cards">
+    <div class="col-lg-{{ '8' if current_user.is_admin else '12' }}">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Zones</h3>
+          <div class="card-actions">
+            <a href="{{ url_for('zones.index') }}" class="btn btn-sm">View all</a>
+          </div>
+        </div>
+        {% if zones %}
+          <div class="table-responsive">
+            <table class="table card-table table-vcenter">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Kind</th>
+                  <th>Serial</th>
+                  <th>DNSSEC</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for zone in zones[:10] %}
+                  <tr>
+                    <td>
+                      <a href="{{ url_for('zones.detail', zone_id=zone.id) }}" class="text-reset">
+                        {{ zone.name }}
+                      </a>
+                    </td>
+                    <td><span class="badge bg-secondary-lt">{{ zone.kind }}</span></td>
+                    <td class="text-secondary font-monospace">{{ zone.serial | default('—') }}</td>
+                    <td>
+                      {% if zone.dnssec %}
+                        <span class="badge bg-success-lt"><i class="ti ti-lock me-1"></i>Signed</span>
+                      {% else %}
+                        <span class="text-secondary">—</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if zones | length > 10 %}
+            <div class="card-footer text-secondary">
+              Showing 10 of {{ zones | length }} zones.
+            </div>
+          {% endif %}
+        {% else %}
+          <div class="card-body">
+            <div class="empty">
+              <div class="empty-icon"><i class="ti ti-list-details icon-lg"></i></div>
+              <p class="empty-title">No zones yet</p>
+              <p class="empty-subtitle text-secondary">
+                {% if current_user.is_operator %}
+                  Create a zone to start serving DNS records.
+                {% else %}
+                  No zones have been shared with your account yet. Ask an administrator
+                  to grant you access.
+                {% endif %}
+              </p>
+              {% if current_user.is_operator %}
+                <div class="empty-action">
+                  <a href="{{ url_for('zones.create') }}" class="btn btn-primary">
+                    <i class="ti ti-plus me-2"></i>Create the first zone
+                  </a>
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        {% endif %}
+      </div>
+
+      {% if stats %}
+        <div class="card mt-3">
+          <div class="card-header"><h3 class="card-title">Server statistics</h3></div>
+          <div class="card-body">
+            <div class="row g-3">
+              {% for label, value in stats %}
+                <div class="col-6 col-md-4">
+                  <div class="subheader">{{ label }}</div>
+                  <div class="h3 mb-0 font-monospace">{{ value }}</div>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      {% endif %}
+    </div>
+
+    {% if current_user.is_admin %}
+      <div class="col-lg-4">
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Recent activity</h3>
+            <div class="card-actions">
+              <a href="{{ url_for('admin.audit_log') }}" class="btn btn-sm">Full log</a>
+            </div>
+          </div>
+          {% if recent %}
+            <div class="list-group list-group-flush">
+              {% for entry in recent %}
+                <div class="list-group-item">
+                  <div class="row align-items-center">
+                    <div class="col-auto">
+                      {% if entry.success %}
+                        <span class="badge bg-success"></span>
+                      {% else %}
+                        <span class="badge bg-danger"></span>
+                      {% endif %}
+                    </div>
+                    <div class="col text-truncate">
+                      <span class="text-body d-block">{{ entry.action }}</span>
+                      <small class="text-secondary d-block text-truncate">
+                        {{ entry.actor_name }}{% if entry.target %} · {{ entry.target }}{% endif %}
+                      </small>
+                    </div>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="card-body text-secondary">Nothing has been recorded yet.</div>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}

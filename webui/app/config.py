@@ -114,6 +114,10 @@ class GroupRoleMap:
         case-insensitive: directories, Active Directory above all, are
         inconsistent about the case of group names.
         """
+        # IdPs do send nulls inside a groups array; treat anything that is not
+        # a non-empty string as absent rather than crashing the sign-in.
+        if not isinstance(group, str):
+            return set()
         group = group.strip()
         if not group:
             return set()
@@ -145,7 +149,7 @@ class GroupRoleMap:
         return self.default_role
 
     @classmethod
-    def from_env(cls, prefix: str, default_role: str = ROLE_USER) -> "GroupRoleMap":
+    def from_env(cls, prefix: str, default_role: str = ROLE_USER) -> GroupRoleMap:
         return cls(
             admin_groups=tuple(env_list(f"{prefix}_ADMIN_GROUP")),
             operator_groups=tuple(env_list(f"{prefix}_OPERATOR_GROUP")),
@@ -175,7 +179,7 @@ class LdapConfig:
     roles: GroupRoleMap = field(default_factory=GroupRoleMap)
 
     @classmethod
-    def from_env(cls) -> "LdapConfig":
+    def from_env(cls) -> LdapConfig:
         enabled = env_bool("LDAP_ENABLED", False)
         if not enabled:
             return cls()
@@ -241,7 +245,7 @@ class OAuthProvider:
         return bool(self.discovery_url)
 
     @classmethod
-    def from_env(cls, name: str) -> "OAuthProvider":
+    def from_env(cls, name: str) -> OAuthProvider:
         prefix = f"OAUTH_{name.upper().replace('-', '_')}"
         client_id = env_str(f"{prefix}_CLIENT_ID")
         client_secret = env_secret(f"{prefix}_CLIENT_SECRET")
@@ -311,7 +315,7 @@ class SamlConfig:
     roles: GroupRoleMap = field(default_factory=GroupRoleMap)
 
     @classmethod
-    def from_env(cls) -> "SamlConfig":
+    def from_env(cls) -> SamlConfig:
         if not env_bool("SAML_ENABLED", False):
             return cls()
         metadata_url = env_str("SAML_IDP_METADATA_URL")
@@ -372,7 +376,7 @@ class AuthConfig:
         )
 
     @classmethod
-    def from_env(cls) -> "AuthConfig":
+    def from_env(cls) -> AuthConfig:
         providers = tuple(OAuthProvider.from_env(name) for name in env_list("OAUTH_PROVIDERS"))
         seen: set[str] = set()
         for candidate in providers:

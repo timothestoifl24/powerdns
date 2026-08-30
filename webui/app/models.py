@@ -8,7 +8,7 @@ can be backed up, migrated and permissioned independently.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
@@ -26,7 +26,7 @@ from .config import AUTH_LOCAL, ROLE_ADMIN, ROLE_OPERATOR, ROLE_USER
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Base(DeclarativeBase):
@@ -68,7 +68,7 @@ class User(Base):
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    zone_grants: Mapped[list["ZoneAccess"]] = relationship(
+    zone_grants: Mapped[list[ZoneAccess]] = relationship(
         back_populates="user", cascade="all, delete-orphan", lazy="selectin"
     )
 

@@ -1,0 +1,31 @@
+/* Small additions on top of Tabler. Everything else is stock theme. */
+
+/* Long record contents (DNSKEY, TXT, RRSIG) must wrap instead of forcing the
+   whole table into a horizontal scroll. */
+.text-break {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Zone and record names read better slightly tighter than the body font. */
+.font-monospace {
+  font-size: 0.875em;
+}
+
+/* Tabler's .table-hover highlight is subtle on the records table, where rows
+   are tall; give the row being acted on a clearer affordance. */
+.table-hover > tbody > tr:hover {
+  --tblr-table-accent-bg: var(--tblr-active-bg);
+}
+
+/* The record modal's textarea is the main input on that form. */
+#record-content {
+  min-height: 6rem;
+}
+
+/* Keep the sign-in card comfortable on small screens. */
+@media (max-width: 575.98px) {
+  .page-center .container-tight {
+    padding-inline: 1rem;
+  }
+}

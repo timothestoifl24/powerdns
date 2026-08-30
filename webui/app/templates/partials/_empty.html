@@ -1,0 +1,7 @@
+{# Shared empty state. Callers set `title`, `message` and optionally `action`. #}
+<div class="empty">
+  <div class="empty-icon"><i class="ti {{ icon | default('ti-inbox') }} icon-lg"></i></div>
+  <p class="empty-title">{{ title }}</p>
+  <p class="empty-subtitle text-secondary">{{ message }}</p>
+  {% if action %}<div class="empty-action">{{ action | safe }}</div>{% endif %}
+</div>

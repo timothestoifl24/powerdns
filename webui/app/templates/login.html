@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Sign in · {{ site_name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/tabler/tabler.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/tabler/tabler-icons.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/svg+xml">
+  <script src="{{ url_for('static', filename='vendor/tabler/tabler-theme.min.js') }}"></script>
+</head>
+<body class="d-flex flex-column bg-surface-secondary">
+<div class="page page-center">
+  <div class="container container-tight py-4">
+
+    <div class="text-center mb-4">
+      <span class="avatar avatar-lg bg-primary-lt mb-2"><i class="ti ti-world-www icon-lg"></i></span>
+      <h1 class="h2 mt-2 mb-0">{{ site_name }}</h1>
+      <p class="text-secondary">Authoritative DNS management</p>
+    </div>
+
+    {% include "partials/_flash.html" %}
+
+    <div class="card card-md">
+      <div class="card-body">
+
+        {% if auth_config.local_enabled or auth_config.ldap.enabled %}
+          <h2 class="h3 text-center mb-4">Sign in to your account</h2>
+          <form method="post" action="{{ url_for('auth.login') }}" autocomplete="on" novalidate>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="next" value="{{ next_url }}">
+
+            <div class="mb-3">
+              <label class="form-label" for="username">Username</label>
+              <input type="text" id="username" name="username" class="form-control"
+                     placeholder="your username" value="{{ username }}"
+                     autocomplete="username" autofocus required>
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label" for="password">Password</label>
+              <div class="input-group input-group-flat">
+                <input type="password" id="password" name="password" class="form-control"
+                       placeholder="your password" autocomplete="current-password" required>
+                <span class="input-group-text">
+                  <button type="button" class="btn btn-link link-secondary p-0 border-0 bg-transparent"
+                          data-password-toggle="password" title="Show password"
+                          aria-label="Show password">
+                    <i class="ti ti-eye"></i>
+                  </button>
+                </span>
+              </div>
+            </div>
+
+            <div class="form-footer">
+              <button type="submit" class="btn btn-primary w-100">
+                <i class="ti ti-login me-2"></i>Sign in
+              </button>
+            </div>
+          </form>
+        {% endif %}
+
+        {% set has_sso = auth_config.oauth_providers or auth_config.saml.enabled %}
+        {% if has_sso %}
+          {% if auth_config.local_enabled or auth_config.ldap.enabled %}
+            <div class="hr-text hr-text-center my-4">or continue with</div>
+          {% else %}
+            <h2 class="h3 text-center mb-4">Sign in</h2>
+          {% endif %}
+
+          <div class="row g-2">
+            {% for provider in auth_config.oauth_providers %}
+              <div class="col-12">
+                <a href="{{ url_for('auth.oauth_login', provider=provider.name, next=next_url) }}"
+                   class="btn btn-outline-primary w-100">
+                  <i class="ti {{ provider.icon }} me-2"></i>{{ provider.display_name }}
+                </a>
+              </div>
+            {% endfor %}
+            {% if auth_config.saml.enabled %}
+              <div class="col-12">
+                <a href="{{ url_for('auth.saml_login', next=next_url) }}"
+                   class="btn btn-outline-primary w-100">
+                  <i class="ti ti-shield-lock me-2"></i>Single sign-on (SAML)
+                </a>
+              </div>
+            {% endif %}
+          </div>
+        {% endif %}
+
+      </div>
+    </div>
+
+    {% if auth_config.ldap.enabled %}
+      <div class="text-center text-secondary mt-3 small">
+        <i class="ti ti-server me-1"></i>Directory accounts can sign in with the form above.
+      </div>
+    {% endif %}
+  </div>
+</div>
+<script src="{{ url_for('static', filename='vendor/tabler/tabler.min.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+</body>
+</html>

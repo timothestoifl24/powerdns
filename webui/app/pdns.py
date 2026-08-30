@@ -83,7 +83,7 @@ class RRSet:
         )
 
     @classmethod
-    def from_api(cls, payload: dict[str, Any]) -> "RRSet":
+    def from_api(cls, payload: dict[str, Any]) -> RRSet:
         return cls(
             name=payload.get("name", ""),
             type=payload.get("type", ""),
@@ -308,9 +308,7 @@ class PdnsClient:
             ],
         }
         if comment:
-            rrset["comments"] = [
-                {"content": comment, "account": account, "modified_at": 0}
-            ]
+            rrset["comments"] = [{"content": comment, "account": account, "modified_at": 0}]
         else:
             # An empty list clears any existing comment; omitting the key would
             # leave a stale comment attached to the new content.

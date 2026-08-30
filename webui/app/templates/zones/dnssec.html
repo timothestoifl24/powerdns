@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}DNSSEC · {{ zone_name }} · {{ site_name }}{% endblock %}
+{% block header_pretitle %}
+  <a href="{{ url_for('zones.detail', zone_id=zone.id) }}" class="text-reset">{{ zone_name }}</a>
+{% endblock %}
+{% block header_title %}DNSSEC{% endblock %}
+
+{% block content %}
+  <div class="row row-cards">
+    <div class="col-lg-5">
+      <div class="card">
+        <div class="card-body text-center">
+          {% if zone.dnssec %}
+            <span class="avatar avatar-xl bg-success-lt mb-3"><i class="ti ti-lock icon-lg"></i></span>
+            <h3>This zone is signed</h3>
+            <p class="text-secondary">
+              PowerDNS signs answers and maintains the RRSIG, NSEC and DNSKEY records.
+            </p>
+            <form method="post"
+                  data-confirm="Disable DNSSEC and delete every signing key for this zone?">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="disable">
+              <button type="submit" class="btn btn-outline-danger">
+                <i class="ti ti-lock-open me-2"></i>Disable DNSSEC
+              </button>
+            </form>
+          {% else %}
+            <span class="avatar avatar-xl bg-secondary-lt mb-3"><i class="ti ti-lock-open icon-lg"></i></span>
+            <h3>This zone is not signed</h3>
+            <p class="text-secondary">
+              Enabling DNSSEC creates a combined signing key (CSK) and signs the zone.
+              You still have to publish the DS record at the parent registry.
+            </p>
+            <form method="post">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="enable">
+              <button type="submit" class="btn btn-primary">
+                <i class="ti ti-lock me-2"></i>Enable DNSSEC
+              </button>
+            </form>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-7">
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">Signing keys</h3></div>
+        {% if keys %}
+          <div class="table-responsive">
+            <table class="table card-table table-vcenter">
+              <thead>
+                <tr><th>ID</th><th>Type</th><th>Algorithm</th><th>Bits</th><th>Active</th></tr>
+              </thead>
+              <tbody>
+                {% for key in keys %}
+                  <tr>
+                    <td class="font-monospace">{{ key.id }}</td>
+                    <td><span class="badge bg-blue-lt">{{ key.keytype | upper }}</span></td>
+                    <td>{{ key.algorithm | default('—') }}</td>
+                    <td>{{ key.bits | default('—') }}</td>
+                    <td>
+                      {% if key.active %}
+                        <span class="badge bg-success-lt">Active</span>
+                      {% else %}
+                        <span class="badge bg-secondary-lt">Inactive</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% if key.ds %}
+                    <tr>
+                      <td></td>
+                      <td colspan="4">
+                        <div class="subheader mb-1">DS records for the parent zone</div>
+                        {% for ds in key.ds %}
+                          <div class="font-monospace small text-break">{{ ds }}</div>
+                        {% endfor %}
+                      </td>
+                    </tr>
+                  {% endif %}
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-secondary">No signing keys exist for this zone.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% endblock %}

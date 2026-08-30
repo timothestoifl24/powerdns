@@ -104,10 +104,6 @@ const page = await context.newPage()
 
 await mkdir(OUT, { recursive: true })
 
-// The sign-in screen, before there is a session.
-await page.goto(`${BASE}/auth/login`)
-await shot(page, 'login')
-
 await login(page)
 
 // ---------------------------------------------------------------- seed data
@@ -181,6 +177,26 @@ if (await grant.count()) {
   await page.waitForLoadState('networkidle')
 }
 
+// An OAuth provider, added the way an administrator would: through the UI
+// rather than through .env. The discovery URL points at nothing reachable --
+// saving only validates the configuration, and the Test button is what would
+// contact the provider.
+await page.goto(`${BASE}/admin/auth/new/oauth`)
+await page.fill('#name', 'keycloak')
+await page.fill('#display_name', 'Company SSO')
+await page.fill(
+  '#discovery_url',
+  'https://sso.example.com/realms/main/.well-known/openid-configuration',
+)
+await page.fill('#client_id', 'powerdns-admin')
+await page.fill('#client_secret', 'Sc4ffold-Demo-Only-2026-oauth')
+await page.fill('#groups_claim', 'groups')
+await page.fill('#admin_group', 'dns-admins')
+await page.selectOption('#default_role', 'none')
+await page.getByRole('button', { name: 'Save provider' }).click()
+await page.waitForLoadState('networkidle')
+await assertNoError(page, 'creating the OAuth provider')
+
 // Sign the flagship zone, so the DNSSEC page has keys and DS records on it.
 await page.goto(`${BASE}/zones/example.com./dnssec`)
 const enable = page.locator('form input[value=enable]')
@@ -216,6 +232,17 @@ await shot(page, 'dnssec', { fullPage: true })
 await page.goto(`${BASE}/admin/users`)
 await shot(page, 'users')
 
+await page.goto(`${BASE}/admin/auth/`)
+await shot(page, 'auth-providers')
+
+await page.goto(`${BASE}/admin/auth/`)
+await page.locator('tr', { hasText: 'keycloak' }).locator('a[href*="/admin/auth/"]').first().click()
+await page.waitForLoadState('networkidle')
+// Viewport rather than full page: the form is long, and everything worth
+// showing -- identity, the OIDC fields, role mapping and the redirect URI --
+// is above the fold.
+await shot(page, 'auth-provider-form')
+
 await page.goto(`${BASE}/admin/audit`)
 await shot(page, 'audit')
 
@@ -224,6 +251,18 @@ await shot(page, 'settings', { fullPage: true })
 
 await page.goto(`${BASE}/profile/`)
 await shot(page, 'profile')
+
+// The sign-in page again, now that a provider exists -- in a fresh context so
+// there is no session. This is the capture that ships; the earlier one only
+// proves the page renders before anything is configured.
+const anon = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  deviceScaleFactor: 2,
+  colorScheme: 'light',
+})
+const anonPage = await anon.newPage()
+await anonPage.goto(`${BASE}/auth/login`)
+await shot(anonPage, 'login')
 
 await browser.close()
 console.log(`\n${shots.length} screenshots written to ${OUT}`)

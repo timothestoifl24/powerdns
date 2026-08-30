@@ -44,6 +44,7 @@ the user table is empty, but it is sitting in a file on disk.
 
 | Path | Contents |
 | --- | --- |
+| `secrets/db_superuser_password` | PostgreSQL bootstrap superuser, used only by `initdb` |
 | `secrets/pdns_db_password` | PostgreSQL password for the PowerDNS role |
 | `secrets/webui_db_password` | PostgreSQL password for the panel's role |
 | `secrets/pdns_api_key` | Shared secret for the PowerDNS HTTP API |
@@ -115,6 +116,12 @@ docker compose up -d
 
 Compose recreates only the containers whose configuration changed. The database
 volume is untouched, so no zones are lost.
+
+Single sign-on does not need `.env` at all: LDAP, OAuth/OIDC and SAML providers
+can be added under **Administration → Sign-in providers** while the stack is
+running. See [the guide](/guide#sign-in-providers) for how the two sources
+interact, and [advanced configuration](/advanced-config#authentication) for the
+settings themselves.
 
 ## Something already owns port 53
 
@@ -220,7 +227,9 @@ If these nameservers are going to be public, a few things change:
 ├── compose.yml               the three services, wired together
 ├── .env / .env.example       every setting, documented
 ├── secrets/                  generated, gitignored, never in the images
-├── db/initdb/                schema, applied on the first start only
+├── db/
+│   ├── schema/powerdns.sql   the PowerDNS 4.9 gpgsql schema, verbatim
+│   └── initdb/               roles and schema, applied on the first start only
 ├── pdns/                     Dockerfile, entrypoint, pdns.conf template
 ├── webui/                    the Flask panel, its tests and Dockerfile
 └── scripts/generate-secrets.sh

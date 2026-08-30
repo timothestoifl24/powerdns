@@ -34,8 +34,9 @@ Kubernetes secret mounts — no value ever has to appear in `docker inspect`.
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `DB_NAME` | `pdns` | Database holding both schemas. |
-| `PDNS_DB_USER` | `pdns` | Role PowerDNS uses for the `public` schema. |
-| `WEBUI_DB_USER` | `pdnsadmin` | Role the panel uses. |
+| `DB_SUPERUSER` | `postgres` | Bootstrap role: runs `initdb` and the scripts in `db/initdb/`, and is never connected as afterwards. |
+| `PDNS_DB_USER` | `pdns` | Role PowerDNS uses for the `public` schema. `NOSUPERUSER NOCREATEDB NOCREATEROLE`. |
+| `WEBUI_DB_USER` | `pdnsadmin` | Role the panel uses, with the same restrictions. It cannot read the PowerDNS tables, and `pdns` cannot read its. |
 | `WEBUI_DB_SCHEMA` | `pdnsadmin` | Schema the panel's tables live in. |
 | `DATABASE_URL` | *(derived)* | A full SQLAlchemy URL, overriding the discrete parts above. Useful when pointing the panel at a database it does not share with PowerDNS's container. |
 
@@ -72,8 +73,26 @@ and friends).
 Backends can be combined. With local and LDAP both on, the sign-in form tries the
 local account first and falls back to the directory.
 
-**Administration → Settings** shows which backends are actually active, what the
-group mapping resolves to, and the exact redirect URL to register with each
+There are two places to configure an external provider, and both work at once:
+
+- **Administration → Sign-in providers**, in the panel. Add, edit, test and
+  disable providers at runtime, with no restart. This is the quicker route, and
+  the only one with a Test button.
+- **`.env`**, documented below. This is what a configuration-as-code deployment
+  wants, and it is the only way to configure a provider before the panel has an
+  administrator to sign in as.
+
+**The environment always wins.** A provider declared in `.env` appears in the UI
+read-only, and a database entry that collides with it is ignored and labelled
+*Shadowed* rather than silently applied. The settings below therefore describe
+both routes: each UI field is the same setting under a different name.
+
+The rest of this section is the `.env` form; see
+[the guide](/guide#sign-in-providers) for how the UI behaves, including secret
+encryption and what a `SECRET_KEY` rotation does to stored secrets.
+
+**Administration → Settings** shows which backends the environment enables, what
+the group mapping resolves to, and the exact redirect URL to register with each
 provider. When something does not work, check there first — it reports the
 running configuration rather than what you meant to write.
 
@@ -233,7 +252,7 @@ and nowhere else. Narrow it if your compose network is on a known subnet.
 `pdns/Dockerfile` installs `pdns-server` and `pdns-backend-pgsql` from Debian
 trixie, which carries PowerDNS Authoritative 4.9.x. To track upstream releases
 more closely, add `repo.powerdns.com` in that Dockerfile instead. The schema in
-`db/initdb/01-powerdns-schema.sql` matches 4.9 — check the upstream schema before
+`db/schema/powerdns.sql` matches 4.9 — check the upstream schema before
 moving to a different major version.
 
 ## Running the panel outside compose

@@ -32,12 +32,12 @@ features:
     linkText: How it fits together
   - icon: 🔑
     title: Sign in the way you already do
-    details: Local accounts, LDAP / Active Directory, OAuth 2.0 and OpenID Connect, and SAML 2.0 — combinable, with group-to-role mapping for each.
-    link: /advanced-config#authentication
-    linkText: Configure a provider
+    details: Local accounts, LDAP / Active Directory, OAuth 2.0 and OpenID Connect, and SAML 2.0 — added in the panel at runtime or declared in .env, with group-to-role mapping for each.
+    link: /guide#sign-in-providers
+    linkText: Add a provider
   - icon: 🛡️
     title: Separated by schema and by role
-    details: The panel's PostgreSQL user owns its own schema and has no rights on the PowerDNS tables. The PowerDNS API port is never published to the host.
+    details: No application role is a superuser, and neither can read the other's tables — CI asserts it. The PowerDNS API port is never published to the host.
     link: /guide#the-security-model
     linkText: The security model
   - icon: 🔏

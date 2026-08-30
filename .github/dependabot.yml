@@ -134,3 +134,33 @@ updates:
         update-types:
           - minor
           - patch
+
+  # ------------------------------------------------------ Documentation site
+  # VitePress and its Vite/Rollup dependency tree, in docs/. Nothing here ships
+  # in an image or reaches a user's browser at runtime -- the site is static
+  # HTML built in CI -- so these are low-risk bumps, grouped into one PR.
+  - package-ecosystem: npm
+    directory: /docs
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Vienna
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - docs
+    commit-message:
+      prefix: "docs:"
+    cooldown:
+      default-days: 3
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    groups:
+      docs-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

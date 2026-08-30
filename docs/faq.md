@@ -63,9 +63,12 @@ docker compose down -v && docker compose up -d --build
 ### The OAuth provider rejects the redirect URI
 
 Set `BASE_URL` to the public URL of the panel. Without it the panel derives the
-callback from the request it sees, which behind a proxy is the internal
-hostname, and providers match the registered URI exactly.
-**Administration → Settings** prints the exact URI to register.
+callback from the request it sees, which behind a proxy is the internal hostname,
+and providers match the registered URI exactly.
+
+The URI to register is printed for you: on **Administration → Settings** for
+providers declared in `.env`, and on the provider's own page under
+**Administration → Sign-in providers** for ones added in the UI.
 
 ### The panel says PowerDNS is unreachable
 
@@ -156,6 +159,26 @@ a port mapping and firewall it yourself.
 The panel exposes two unauthenticated endpoints for monitoring: `/healthz`
 (liveness) and `/readyz` (database and PowerDNS reachable).
 
+### Do I have to restart the stack to add an identity provider?
+
+No. **Administration → Sign-in providers** adds LDAP, OAuth/OIDC and SAML
+providers at runtime, with a Test button that contacts the provider before anyone
+tries to sign in. Providers are read per request, so a change applies to every
+gunicorn worker immediately.
+
+`.env` still works, and takes precedence: a provider declared there is read-only
+in the UI, and a database entry that collides with it is ignored and shown as
+*Shadowed*. Use `.env` when the configuration is deployed as code, or when you
+need a provider configured before there is an administrator to sign in as.
+
+### I rotated `SECRET_KEY` and my providers stopped working
+
+Provider secrets are encrypted with a key derived from `SECRET_KEY`, so replacing
+`secrets/webui_secret_key` makes them unreadable. The panel reports that on the
+provider page rather than failing at sign-in; re-enter each secret and it works
+again. Providers configured in `.env` are unaffected —
+[details](/upgrading#rotating-secrets).
+
 ### Can I disable local accounts entirely?
 
 Yes: `LOCAL_AUTH_ENABLED=false` once an external provider works. Do it in that
@@ -172,11 +195,12 @@ The bootstrap administrator is recreated only while the user table is *empty*, s
 that will not help. Promote an existing account directly:
 
 ```bash
-docker compose exec -T db psql -U pdns -d pdns \
+docker compose exec -T db psql -U pdnsadmin -d pdns \
   -c "UPDATE pdnsadmin.users SET role='admin' WHERE username='you'"
 ```
 
-The panel reads the role on every request, so it takes effect immediately.
+The panel reads the role on every request, so it takes effect immediately. Note
+the role: `pdnsadmin` owns that schema, and the `pdns` role cannot read it.
 
 ### How do I change the admin password without the panel?
 
@@ -190,7 +214,9 @@ again on the next start when no users remain.
 
 In the named volume `pgdata`, not in the project directory. Both halves of the
 system are in the one database: PowerDNS's tables in the `public` schema, the
-panel's in `pdnsadmin`. A single `pg_dump` is a complete backup.
+panel's in `pdnsadmin`. A single `pg_dump` is a complete backup — taken as the
+bootstrap superuser, because neither application role can read the other's
+schema. See [backups](/upgrading#back-up-first).
 
 ### How do I see what someone changed?
 

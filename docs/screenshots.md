@@ -15,9 +15,10 @@ command. Click any image to open it at full size.
 
 [![The sign-in page, with username and password fields](/screenshots/login.png)](/screenshots/login.png)
 
-The local sign-in form. When LDAP, OAuth or SAML are configured, their buttons
-appear underneath, and turning off `LOCAL_AUTH_ENABLED` removes this form
-entirely so everyone goes through the identity provider.
+The local sign-in form, with one OAuth provider configured — every enabled
+provider gets a button under *or continue with*. Turning off
+`LOCAL_AUTH_ENABLED` removes the username and password fields entirely, so
+everyone goes through the identity provider.
 
 ## Dashboard
 
@@ -101,6 +102,37 @@ The role reminder underneath is deliberate: choosing between *operator* and
 *user* is the decision people get wrong, so the consequences are written next to
 the choice.
 
+## Sign-in providers
+
+[![The sign-in providers page, listing one OAuth provider with edit, test, disable and delete actions](/screenshots/auth-providers.png)](/screenshots/auth-providers.png)
+
+LDAP, OAuth/OpenID Connect and SAML providers, managed at runtime — no restart,
+no redeploy. **Test** contacts the provider immediately, so a new one is verified
+without asking someone to attempt a sign-in and report what happened.
+
+Providers declared in `.env` also appear here, listed read-only: the environment
+always wins, and a database entry that collides with one is ignored and labelled
+*Shadowed*.
+
+[![The provider form, with identity, OIDC settings, role mapping and the redirect URI to register](/screenshots/auth-provider-form.png)](/screenshots/auth-provider-form.png)
+
+One discovery URL is enough for an OpenID Connect provider; the endpoint fields
+below are for providers that only speak plain OAuth 2.0. Role mapping sits beside
+the settings it affects, and *Refuse access* as the default role is what limits
+sign-in to members of the mapped groups.
+
+Secrets are write-only: the field shows *unchanged — leave empty to keep*, so a
+URL can be corrected without having the client secret to hand, and an explicit
+*Clear the stored value* checkbox is the only way to remove one. They are
+encrypted before storage with a key derived from `SECRET_KEY`.
+
+::: tip Set `BASE_URL`
+The **Redirect URI** card shows the callback to register with the provider. This
+capture is from a stack reached at its container name, which is why it reads
+`http://webui:8080/…`; behind a reverse proxy, set `BASE_URL` so the panel hands
+the provider the address users actually reach.
+:::
+
 ## Audit log
 
 [![The audit log, showing who changed what, when and from which address](/screenshots/audit.png)](/screenshots/audit.png)
@@ -133,12 +165,13 @@ misleading.
 
 A read-only view of the running configuration: whether PowerDNS is reachable and
 which version it reports, the session lifetime, the cookie and proxy settings,
-and which authentication backends are actually enabled. With OAuth or SAML
-configured, this page also prints the exact redirect URI and metadata URL to
-register with the provider.
+and which authentication backends the *environment* enables. With OAuth or SAML
+configured there, this page also prints the exact redirect URI and metadata URL
+to register with the provider.
 
-Nothing here is editable — configuration comes from the environment, so this
-page reports the truth rather than keeping a second copy of it.
+Nothing here is editable — these settings come from the environment, so the page
+reports the truth rather than keeping a second copy of it. Providers you can
+change at runtime live on their own page, above.
 
 ## Regenerating these
 
@@ -161,7 +194,8 @@ docker run --rm --network powerdns_backend \
 ```
 
 The script is [`docs/scripts/capture-screenshots.mjs`](https://github.com/timothestoifl24/powerdns/blob/main/docs/scripts/capture-screenshots.mjs).
-It seeds two zones, a handful of records, two extra users and one DNSSEC-signed
-zone, then writes the eleven PNGs on this page into `docs/public/screenshots/`. Set `PANEL_URL` to
+It seeds two zones, a handful of records, two extra users, an OAuth provider and
+one DNSSEC-signed zone, then writes the thirteen PNGs on this page into
+`docs/public/screenshots/`. Set `PANEL_URL` to
 `http://127.0.0.1:9191` to run it from the host instead of on the compose
 network.

@@ -116,7 +116,7 @@ jobs:
           set -euo pipefail
           # An empty list is the correct answer; an error means the schema or
           # the database credentials are wrong.
-          docker compose exec -T db psql -U pdns -d pdns -c '\dt' | tee /tmp/tables.txt
+          docker compose exec -T db psql -U postgres -d pdns -c '\dt' | tee /tmp/tables.txt
           for table in domains records cryptokeys domainmetadata tsigkeys comments supermasters; do
             grep -q " $table " /tmp/tables.txt || { echo "missing table: $table" >&2; exit 1; }
           done
@@ -124,12 +124,50 @@ jobs:
       - name: The admin panel's schema is separate from PowerDNS's
         run: |
           set -euo pipefail
-          docker compose exec -T db psql -U pdns -d pdns -c \
+          docker compose exec -T db psql -U postgres -d pdns -c \
             "SELECT tablename FROM pg_tables WHERE schemaname='pdnsadmin' ORDER BY 1" \
             | tee /tmp/admin_tables.txt
           for table in users zone_access audit_log app_settings; do
             grep -q "$table" /tmp/admin_tables.txt || { echo "missing table: $table" >&2; exit 1; }
           done
+
+      - name: Neither application role is a superuser
+        run: |
+          set -euo pipefail
+          # The whole point of the separate bootstrap role: if either of these
+          # comes back as a superuser, the privilege separation below is
+          # decorative.
+          for role in pdns pdnsadmin; do
+            super=$(docker compose exec -T db psql -U postgres -d pdns -tAc \
+              "SELECT rolsuper OR rolcreaterole OR rolcreatedb FROM pg_roles WHERE rolname='$role'")
+            echo "$role privileged: $super"
+            [ "$super" = "f" ] || { echo "$role must not be superuser/createrole/createdb" >&2; exit 1; }
+          done
+          # And the tables must belong to pdns, not to the bootstrap superuser.
+          owner=$(docker compose exec -T db psql -U postgres -d pdns -tAc \
+            "SELECT tableowner FROM pg_tables WHERE schemaname='public' AND tablename='records'")
+          echo "records owner: $owner"
+          [ "$owner" = "pdns" ] || { echo "records should be owned by pdns, got $owner" >&2; exit 1; }
+
+      - name: Each role is denied the other's tables
+        run: |
+          set -euo pipefail
+          # Prove the isolation rather than assume it. Both of these must fail.
+          if docker compose exec -T db psql -U pdnsadmin -d pdns -tAc \
+               'SELECT count(*) FROM public.domains' 2>/tmp/denied_a.txt; then
+            echo "pdnsadmin could read the PowerDNS tables" >&2; exit 1
+          fi
+          grep -qi "permission denied" /tmp/denied_a.txt \
+            || { echo "expected a permission error, got:" >&2; cat /tmp/denied_a.txt >&2; exit 1; }
+          echo "pdnsadmin -> public.domains: denied"
+
+          if docker compose exec -T db psql -U pdns -d pdns -tAc \
+               'SELECT count(*) FROM pdnsadmin.users' 2>/tmp/denied_b.txt; then
+            echo "pdns could read the admin panel's tables" >&2; exit 1
+          fi
+          grep -qi "permission denied" /tmp/denied_b.txt \
+            || { echo "expected a permission error, got:" >&2; cat /tmp/denied_b.txt >&2; exit 1; }
+          echo "pdns -> pdnsadmin.users: denied"
 
       - name: The web UI answers and serves the Tabler theme
         run: |

@@ -282,3 +282,68 @@ class TestEveryRouteIsGuarded:
             if response.status_code != 400:
                 accepted.append((method, url, response.status_code))
         assert not accepted, f"state-changing routes without CSRF enforcement: {accepted}"
+
+
+class TestSameOriginPath:
+    """The ?next= parameter and the SAML RelayState both reach redirect().
+
+    The helper does not return the caller's string: it rebuilds a path from the
+    parsed components with scheme and host emptied, so what comes out cannot
+    carry an origin even if the checks were wrong.
+    """
+
+    @pytest.mark.parametrize(
+        "hostile",
+        [
+            "https://evil.test/steal",
+            "http://evil.test",
+            "//evil.test/steal",
+            "//evil.test",
+            "\\\\evil.test",
+            "/\\evil.test",
+            "javascript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "https://evil.test\\@localhost/",
+            "",
+            None,
+        ],
+    )
+    def test_off_site_targets_are_refused(self, app, hostile):
+        from app.security import same_origin_path
+
+        with app.test_request_context("/auth/login"):
+            assert same_origin_path(hostile) is None
+
+    @pytest.mark.parametrize(
+        ("target", "expected"),
+        [
+            ("/zones/", "/zones/"),
+            ("/zones/example.com.", "/zones/example.com."),
+            ("/admin/users?page=2", "/admin/users?page=2"),
+            ("/profile/#password", "/profile/#password"),
+            ("http://localhost/zones/", "/zones/"),
+        ],
+    )
+    def test_same_site_targets_come_back_relative(self, app, target, expected):
+        from app.security import same_origin_path
+
+        with app.test_request_context("/auth/login", base_url="http://localhost"):
+            assert same_origin_path(target) == expected
+
+    def test_the_result_never_carries_a_scheme_or_host(self, app):
+        """The structural guarantee, stated as a test."""
+        from app.security import same_origin_path
+
+        with app.test_request_context("/auth/login", base_url="http://localhost"):
+            for target in ("http://localhost/a", "/b", "/c?d=e#f"):
+                result = same_origin_path(target)
+                assert result is not None
+                assert result.startswith("/")
+                assert not result.startswith("//")
+                assert "://" not in result
+
+    def test_redirect_target_falls_back_when_next_is_hostile(self, app):
+        from app.security import redirect_target
+
+        with app.test_request_context("/auth/login?next=https://evil.test/steal"):
+            assert redirect_target() == "/"

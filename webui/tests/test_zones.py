@@ -101,7 +101,10 @@ class TestPdnsClient:
 class TestZoneAccess:
     def test_operator_sees_every_zone(self, client, users, login, zone):
         login("operator")
-        assert b"example.com" in client.get("/zones/").data
+        # Assert the zone is linked, not merely that the string "example.com"
+        # appears somewhere: a bare substring would also match an unrelated
+        # mention, or a lookalike such as notexample.com.
+        assert b'href="/zones/example.com."' in client.get("/zones/").data
 
     def test_plain_user_sees_no_zones_without_a_grant(self, client, users, login, zone):
         login("viewer")
@@ -114,7 +117,7 @@ class TestZoneAccess:
             session.add(ZoneAccess(user_id=users["viewer"], zone="example.com."))
             session.commit()
         login("viewer")
-        assert b"example.com" in client.get("/zones/").data
+        assert b'href="/zones/example.com."' in client.get("/zones/").data
 
     def test_plain_user_cannot_open_an_ungranted_zone(self, client, users, login, zone):
         login("viewer")

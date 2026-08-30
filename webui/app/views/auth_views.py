@@ -191,9 +191,16 @@ def oauth_callback(provider: str):
 
 
 def _safe_next(candidate: str) -> str:
-    from ..security import is_safe_redirect_url
+    """Where to send the browser after an external sign-in.
 
-    return candidate if is_safe_redirect_url(candidate) else url_for("dashboard.index")
+    The OAuth "next" value and the SAML RelayState both come back through the
+    identity provider, so neither is trustworthy. same_origin_path returns a
+    rebuilt site-relative path or nothing at all, so an absolute URL cannot
+    survive this call.
+    """
+    from ..security import same_origin_path
+
+    return same_origin_path(candidate) or url_for("dashboard.index")
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +271,13 @@ def saml_metadata():
     try:
         xml = saml_auth.metadata_xml(config)
     except saml_auth.SamlError as exc:
+        # /auth/saml/metadata is unauthenticated by design -- the IdP fetches
+        # it. The exception text can name internal hosts, certificate paths and
+        # configuration, so it goes to the log and the caller gets nothing.
         log.error("could not build SP metadata: %s", exc)
-        return Response(str(exc), status=500, mimetype="text/plain")
+        return Response(
+            "SAML metadata is unavailable. See the server log for the reason.",
+            status=500,
+            mimetype="text/plain",
+        )
     return Response(xml, mimetype="text/xml")

@@ -117,7 +117,10 @@ def resolve_identity(claim: IdentityClaim, roles: GroupRoleMap) -> User:
             is_active=True,
         )
         db.add(user)
-        log.info("provisioned new %s user %s with role %s", claim.auth_source, username, role)
+        # The username is deliberately absent: audit.record() already stores
+        # who was provisioned, and that table is access-controlled where
+        # container stderr is not.
+        log.info("provisioned a new %s user with role %s", claim.auth_source, role)
     elif not user.is_active:
         raise ProvisioningError("This account has been deactivated.")
 

@@ -8,7 +8,6 @@ from flask import (
     Blueprint,
     Response,
     abort,
-    current_app,
     flash,
     redirect,
     render_template,
@@ -24,6 +23,7 @@ from ..auth import oauth as oauth_auth
 from ..auth import saml as saml_auth
 from ..auth.ldap_auth import LdapAuthError
 from ..auth.ldap_auth import authenticate as ldap_authenticate
+from ..auth.store import effective_auth_config
 from ..security import (
     current_user,
     get_throttle,
@@ -46,7 +46,7 @@ def login():
     if current_user() is not None:
         return redirect(redirect_target())
 
-    auth_config = current_app.config["AUTH"]
+    auth_config = effective_auth_config()
     if not auth_config.any_enabled:
         return render_template(
             "error.html",
@@ -138,7 +138,7 @@ def logout():
 
 
 def _provider_or_404(name: str):
-    provider = current_app.config["AUTH"].provider(name)
+    provider = effective_auth_config().provider(name)
     if provider is None:
         abort(404)
     return provider
@@ -202,7 +202,7 @@ def _safe_next(candidate: str) -> str:
 
 
 def _saml_config():
-    config = current_app.config["AUTH"].saml
+    config = effective_auth_config().saml
     if not config.enabled:
         abort(404)
     return config

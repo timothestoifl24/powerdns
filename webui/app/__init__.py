@@ -85,6 +85,7 @@ def create_app(overrides: dict | None = None) -> Flask:
 def register_blueprints(app: Flask) -> None:
     from .views.admin import bp as admin_bp
     from .views.auth_views import bp as auth_bp
+    from .views.authproviders import bp as authproviders_bp
     from .views.dashboard import bp as dashboard_bp
     from .views.profile import bp as profile_bp
     from .views.zones import bp as zones_bp
@@ -93,6 +94,7 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(zones_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(authproviders_bp)
     app.register_blueprint(profile_bp)
 
 
@@ -180,6 +182,23 @@ def register_error_handlers(app: Flask) -> None:
         )
 
 
+def _template_auth_config():
+    """Auth configuration for templates: the environment plus the database.
+
+    The login page renders one button per provider, so it needs the same
+    merged view the sign-in code uses. Falling back to the environment alone
+    keeps the login page renderable when the database is unreachable -- which
+    is exactly when an administrator needs to get in.
+    """
+    from .auth.store import effective_auth_config
+
+    try:
+        return effective_auth_config()
+    except Exception:  # pragma: no cover - defensive; store already catches
+        current_app.logger.warning("falling back to environment auth configuration", exc_info=True)
+        return current_app.config["AUTH"]
+
+
 def register_template_helpers(app: Flask) -> None:
     from .pdns import PdnsError
 
@@ -190,7 +209,7 @@ def register_template_helpers(app: Flask) -> None:
             "current_user": current_user(),
             "site_name": app.config["SITE_NAME"],
             "app_version": __version__,
-            "auth_config": app.config["AUTH"],
+            "auth_config": _template_auth_config(),
             "record_types": COMMON_RECORD_TYPES,
             "zone_kinds": ZONE_KINDS,
         }

@@ -213,7 +213,9 @@ class TestEveryRouteIsGuarded:
 
     SAMPLE_ARGS = {
         "user_id": "1",
+        "provider_id": "1",
         "provider": "keycloak",
+        "kind": "oauth",
         "zone_id": "example.com.",
         "filename": "css/app.css",
     }
@@ -229,6 +231,10 @@ class TestEveryRouteIsGuarded:
                     .replace(f"<path:{key}>", value)
                     .replace(f"<{key}>", value)
                 )
+            # A placeholder left in the URL would not match its rule, and the
+            # 404 that follows looks exactly like "unguarded" in the assertions
+            # below. Fail as the harness gap it is, naming the missing argument.
+            assert "<" not in url, f"{url} has an unsubstituted argument; add it to SAMPLE_ARGS"
             for method in sorted(rule.methods - {"HEAD", "OPTIONS"}):
                 yield method, url
 

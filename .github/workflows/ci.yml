@@ -11,6 +11,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege for every job. Without this the GITHUB_TOKEN gets whatever
+# the repository default is, which for older repositories is read/write on
+# everything -- so a compromised action or dependency could push commits or
+# publish packages. The publish job re-declares what it actually needs
+# (packages: write); a job-level block overrides this one.
+permissions:
+  contents: read
+
 env:
   REGISTRY: ghcr.io
 

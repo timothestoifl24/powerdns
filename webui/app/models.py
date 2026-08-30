@@ -8,6 +8,7 @@ can be backed up, migrated and permissioned independently.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 from sqlalchemy import (
@@ -167,6 +168,76 @@ class AuditLog(Base):
     success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
+class AuthProviderConfig(Base):
+    """An external identity provider configured through the web UI.
+
+    Providers can also come from the environment, which is what a
+    configuration-as-code deployment wants. Those stay authoritative: a row
+    here that collides with an environment-defined provider is ignored, and
+    the UI says so rather than pretending to have taken effect.
+
+    ``settings`` and ``secrets`` are JSON blobs because the three kinds have
+    very different shapes, and a column per field would make a wide, mostly
+    NULL table. Everything in ``secrets`` is encrypted -- see app/crypto.py.
+    """
+
+    __tablename__ = "auth_providers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    #: AUTH_LDAP / AUTH_OAUTH / AUTH_SAML.
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    #: URL-safe slug. For OAuth this appears in the callback URL, so changing
+    #: it means re-registering the redirect URI with the provider.
+    name: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    display_name: Mapped[str] = mapped_column(String(190), nullable=False, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    settings_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    secrets_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    # -- JSON helpers -----------------------------------------------------
+
+    @property
+    def settings(self) -> dict:
+        return self._load(self.settings_json)
+
+    @settings.setter
+    def settings(self, value: dict) -> None:
+        self.settings_json = json.dumps(value or {}, sort_keys=True)
+
+    @property
+    def secrets(self) -> dict:
+        return self._load(self.secrets_json)
+
+    @secrets.setter
+    def secrets(self, value: dict) -> None:
+        self.secrets_json = json.dumps(value or {}, sort_keys=True)
+
+    @staticmethod
+    def _load(raw: str) -> dict:
+        """Tolerate a corrupt or hand-edited blob rather than failing sign-in."""
+        try:
+            value = json.loads(raw or "{}")
+        except ValueError:
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def setting(self, key: str, default=""):
+        value = self.settings.get(key, default)
+        return default if value is None else value
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"<AuthProviderConfig {self.kind}:{self.name} enabled={self.enabled}>"
+
+
 class AppSetting(Base):
     """Runtime-editable settings, for the few things worth changing without a redeploy."""
 
@@ -182,6 +253,7 @@ class AppSetting(Base):
 __all__ = [
     "AppSetting",
     "AuditLog",
+    "AuthProviderConfig",
     "Base",
     "User",
     "ZoneAccess",

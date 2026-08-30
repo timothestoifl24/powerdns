@@ -1,0 +1,42 @@
+{# Renders one provider's group -> role mapping. Expects `roles`. #}
+<div class="mt-2 ps-4 small">
+  {% if roles.admin_groups or roles.operator_groups or roles.user_groups %}
+    <table class="table table-sm mb-0">
+      <tbody>
+        {% if roles.admin_groups %}
+          <tr>
+            <td class="w-1"><span class="badge bg-red-lt">admin</span></td>
+            <td class="font-monospace text-secondary">{{ roles.admin_groups | join(', ') }}</td>
+          </tr>
+        {% endif %}
+        {% if roles.operator_groups %}
+          <tr>
+            <td class="w-1"><span class="badge bg-blue-lt">operator</span></td>
+            <td class="font-monospace text-secondary">{{ roles.operator_groups | join(', ') }}</td>
+          </tr>
+        {% endif %}
+        {% if roles.user_groups %}
+          <tr>
+            <td class="w-1"><span class="badge bg-secondary-lt">user</span></td>
+            <td class="font-monospace text-secondary">{{ roles.user_groups | join(', ') }}</td>
+          </tr>
+        {% endif %}
+        <tr>
+          <td class="w-1 text-secondary">otherwise</td>
+          <td class="text-secondary">
+            {% if roles.default_role %}
+              role <strong>{{ roles.default_role }}</strong>
+            {% else %}
+              <span class="text-danger">access refused</span>
+            {% endif %}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  {% else %}
+    <span class="text-secondary">
+      No group mapping configured — everyone who signs in gets the
+      <strong>{{ roles.default_role or 'no' }}</strong> role.
+    </span>
+  {% endif %}
+</div>

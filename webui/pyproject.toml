@@ -1,0 +1,29 @@
+[tool.ruff]
+# Comfortably wider than 79: DNS names, URLs and SQLAlchemy column definitions
+# all read worse when wrapped.
+line-length = 100
+target-version = "py313"
+extend-exclude = ["app/static/vendor"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # import sorting
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "SIM",  # simplify
+]
+ignore = [
+    "B008",  # function call in argument default: Flask/SQLAlchemy idiom
+    "SIM105",  # contextlib.suppress is not clearer for one-line cleanup
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests deliberately use bare asserts and long parametrise tables.
+"tests/*" = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"

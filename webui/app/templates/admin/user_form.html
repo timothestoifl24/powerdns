@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block title %}{{ user.username if user else 'New user' }} · {{ site_name }}{% endblock %}
+{% block header_pretitle %}
+  <a href="{{ url_for('admin.users') }}" class="text-reset">Users</a>
+{% endblock %}
+{% block header_title %}{{ user.username if user else 'New local user' }}{% endblock %}
+
+{% block content %}
+  <div class="row row-cards">
+    <div class="col-lg-7">
+      <form method="post"
+            action="{{ url_for('admin.update_user', user_id=user.id) if user else url_for('admin.create_user') }}"
+            class="card" novalidate>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="card-header"><h3 class="card-title">Account</h3></div>
+        <div class="card-body">
+
+          {% if not user %}
+            <div class="mb-3">
+              <label class="form-label required" for="username">Username</label>
+              <input type="text" id="username" name="username" class="form-control"
+                     value="{{ form.get('username', '') }}" autofocus required>
+              <small class="form-hint">Lower-cased automatically. Letters, digits and . _ @ + -</small>
+            </div>
+          {% endif %}
+
+          {% if not user or user.is_local %}
+            <div class="row g-3 mb-3">
+              <div class="col-md-6">
+                <label class="form-label" for="display_name">Display name</label>
+                <input type="text" id="display_name" name="display_name" class="form-control"
+                       value="{{ user.display_name if user else form.get('display_name', '') }}">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="email">E-mail</label>
+                <input type="email" id="email" name="email" class="form-control"
+                       value="{{ user.email if user else form.get('email', '') }}">
+              </div>
+            </div>
+          {% else %}
+            <div class="alert alert-info" role="alert">
+              <i class="ti ti-info-circle me-2"></i>
+              This account comes from
+              <strong>{{ user.auth_provider or user.auth_source }}</strong>. Its name, e-mail
+              and group membership are refreshed from the identity provider on every sign-in,
+              so they cannot be edited here.
+            </div>
+          {% endif %}
+
+          <div class="mb-3">
+            <label class="form-label required" for="role">Role</label>
+            <select id="role" name="role" class="form-select">
+              {% for role in (roles or ['admin', 'operator', 'user']) %}
+                <option value="{{ role }}"
+                  {{ 'selected' if (user.role if user else form.get('role', 'user')) == role }}>
+                  {{ role }}
+                </option>
+              {% endfor %}
+            </select>
+            {% if user and not user.is_local %}
+              <small class="form-hint">
+                A group mapping is configured for this provider, so this may be overwritten
+                at the user's next sign-in.
+              </small>
+            {% endif %}
+          </div>
+
+          {% if not user %}
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label required" for="password">Password</label>
+                <input type="password" id="password" name="password" class="form-control"
+                       autocomplete="new-password" required>
+                <small class="form-hint">At least 12 characters.</small>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label required" for="confirm_password">Confirm password</label>
+                <input type="password" id="confirm_password" name="confirm_password"
+                       class="form-control" autocomplete="new-password" required>
+              </div>
+            </div>
+          {% else %}
+            <label class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" name="is_active"
+                     {{ 'checked' if user.is_active }}>
+              <span class="form-check-label">Account is active</span>
+            </label>
+            {% if user.is_local %}
+              <div class="mb-0">
+                <label class="form-label" for="new_password">Reset password</label>
+                <input type="password" id="new_password" name="new_password" class="form-control"
+                       autocomplete="new-password" placeholder="leave blank to keep the current one">
+              </div>
+            {% endif %}
+          {% endif %}
+
+        </div>
+        <div class="card-footer d-flex">
+          <a href="{{ url_for('admin.users') }}" class="btn">Cancel</a>
+          <button type="submit" class="btn btn-primary ms-auto">
+            <i class="ti ti-device-floppy me-2"></i>
+            {{ 'Save changes' if user else 'Create user' }}
+          </button>
+        </div>
+      </form>
+    </div>
+
+    {% if user %}
+      <div class="col-lg-5">
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Zone access</h3>
+          </div>
+          <div class="card-body">
+            {% if user.is_operator %}
+              <div class="text-secondary">
+                <i class="ti ti-info-circle me-1"></i>
+                {{ user.role | capitalize }}s have access to every zone, so individual
+                grants do not apply.
+              </div>
+            {% else %}
+              <form method="post" action="{{ url_for('admin.update_zone_access', user_id=user.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                {% if all_zones %}
+                  <div class="mb-2">
+                    <input type="search" class="form-control form-control-sm"
+                           placeholder="Filter zones" data-list-filter="#zone-grants"
+                           aria-label="Filter zones">
+                  </div>
+                  <div id="zone-grants" class="overflow-auto border rounded p-2"
+                       style="max-height: 22rem;">
+                    {% for zone in all_zones %}
+                      <label class="form-check">
+                        <input class="form-check-input" type="checkbox" name="zones"
+                               value="{{ zone }}" {{ 'checked' if zone in granted }}>
+                        <span class="form-check-label font-monospace">{{ zone }}</span>
+                      </label>
+                    {% endfor %}
+                  </div>
+                  <button type="submit" class="btn btn-primary w-100 mt-3">
+                    <i class="ti ti-device-floppy me-2"></i>Save zone access
+                  </button>
+                {% else %}
+                  <div class="text-secondary">No zones exist yet.</div>
+                {% endif %}
+              </form>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="card mt-3">
+          <div class="card-header"><h3 class="card-title">Details</h3></div>
+          <div class="card-body">
+            <dl class="row mb-0">
+              <dt class="col-5 text-secondary">Source</dt>
+              <dd class="col-7">{{ user.auth_provider or user.auth_source }}</dd>
+              <dt class="col-5 text-secondary">Created</dt>
+              <dd class="col-7">{{ user.created_at | datetime }}</dd>
+              <dt class="col-5 text-secondary">Last sign-in</dt>
+              <dd class="col-7">
+                {{ user.last_login_at | datetime if user.last_login_at else 'never' }}
+              </dd>
+            </dl>
+          </div>
+          <div class="card-footer">
+            <button class="btn btn-outline-danger w-100" data-bs-toggle="modal"
+                    data-bs-target="#delete-user-modal">
+              <i class="ti ti-trash me-2"></i>Delete this user
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal modal-blur fade" id="delete-user-modal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-sm modal-dialog-centered" role="document">
+          <div class="modal-content">
+            <form method="post" action="{{ url_for('admin.delete_user', user_id=user.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <div class="modal-body text-center py-4">
+                <i class="ti ti-alert-triangle icon-lg text-danger mb-2"></i>
+                <h3>Delete {{ user.username }}?</h3>
+                <div class="text-secondary">
+                  Their zone grants are removed too. Entries they made in the audit log
+                  are kept.
+                </div>
+              </div>
+              <div class="modal-footer">
+                <div class="w-100">
+                  <div class="row">
+                    <div class="col">
+                      <button type="button" class="btn w-100" data-bs-dismiss="modal">Cancel</button>
+                    </div>
+                    <div class="col">
+                      <button type="submit" class="btn btn-danger w-100">Delete</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}

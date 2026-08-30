@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}New zone · {{ site_name }}{% endblock %}
+{% block header_pretitle %}Zones{% endblock %}
+{% block header_title %}Create a zone{% endblock %}
+
+{% block content %}
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <form method="post" class="card" novalidate>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="card-body">
+
+          <div class="mb-3">
+            <label class="form-label required" for="name">Zone name</label>
+            <input type="text" id="name" name="name" class="form-control font-monospace"
+                   placeholder="example.com" value="{{ form.get('name', '') }}"
+                   autofocus required>
+            <small class="form-hint">
+              The trailing dot is added automatically. For reverse DNS use
+              <code>2.0.192.in-addr.arpa</code>.
+            </small>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" for="kind">Kind</label>
+            <select id="kind" name="kind" class="form-select" data-zone-kind>
+              {% for kind in zone_kinds %}
+                <option value="{{ kind }}"
+                  {{ 'selected' if form.get('kind', 'Native') == kind }}>{{ kind }}</option>
+              {% endfor %}
+            </select>
+            <small class="form-hint">
+              <strong>Native</strong> replicates through PostgreSQL itself.
+              <strong>Master</strong> notifies secondaries over AXFR.
+              <strong>Slave</strong> transfers its contents from a master.
+            </small>
+          </div>
+
+          <div class="mb-3" data-when-kind="Native,Master">
+            <label class="form-label" for="nameservers">Nameservers</label>
+            <textarea id="nameservers" name="nameservers" class="form-control font-monospace"
+                      rows="3" placeholder="ns1.example.com&#10;ns2.example.com"
+                      >{{ form.get('nameservers', default_nameservers | join('\n')) }}</textarea>
+            <small class="form-hint">One per line. These become the zone's NS records.</small>
+          </div>
+
+          <div class="mb-3 d-none" data-when-kind="Slave">
+            <label class="form-label" for="masters">Master addresses</label>
+            <textarea id="masters" name="masters" class="form-control font-monospace"
+                      rows="2" placeholder="192.0.2.53&#10;2001:db8::53"
+                      >{{ form.get('masters', '') }}</textarea>
+            <small class="form-hint">One IP address per line to transfer the zone from.</small>
+          </div>
+
+          <label class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" name="dnssec"
+                   {{ 'checked' if form.get('dnssec') }}>
+            <span class="form-check-label">Enable DNSSEC and create a signing key</span>
+          </label>
+
+        </div>
+        <div class="card-footer d-flex">
+          <a href="{{ url_for('zones.index') }}" class="btn">Cancel</a>
+          <button type="submit" class="btn btn-primary ms-auto">
+            <i class="ti ti-plus me-2"></i>Create zone
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Audit log · {{ site_name }}{% endblock %}
+{% block header_pretitle %}Administration{% endblock %}
+{% block header_title %}Audit log{% endblock %}
+{% block header_subtitle %}
+  Every change made through this panel. Newest first.
+{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div class="card-header">
+      <div class="input-icon">
+        <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+        <input type="search" class="form-control form-control-sm" placeholder="Filter entries"
+               data-table-filter="#audit-table" aria-label="Filter audit entries">
+      </div>
+      <div class="card-actions text-secondary">
+        showing the {{ entries | length }} most recent
+      </div>
+    </div>
+    {% if entries %}
+      <div class="table-responsive">
+        <table class="table card-table table-vcenter" id="audit-table">
+          <thead>
+            <tr>
+              <th class="w-1">When</th>
+              <th>Who</th>
+              <th>Action</th>
+              <th>Target</th>
+              <th>Detail</th>
+              <th class="w-1">From</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in entries %}
+              <tr>
+                <td class="text-secondary text-nowrap small">{{ entry.created_at | datetime }}</td>
+                <td>{{ entry.actor_name }}</td>
+                <td>
+                  <span class="badge {{ 'bg-secondary-lt' if entry.success else 'bg-red-lt' }}">
+                    {{ entry.action }}
+                  </span>
+                </td>
+                <td class="font-monospace small">{{ entry.target }}</td>
+                <td class="text-secondary small">{{ entry.detail }}</td>
+                <td class="text-secondary font-monospace small">{{ entry.remote_addr }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-footer d-flex align-items-center">
+        <span class="text-secondary">Showing up to {{ limit }} entries.</span>
+        <div class="ms-auto btn-list">
+          {% for size in [200, 500, 1000] %}
+            <a href="{{ url_for('admin.audit_log', limit=size) }}"
+               class="btn btn-sm {{ 'btn-primary' if limit == size }}">{{ size }}</a>
+          {% endfor %}
+        </div>
+      </div>
+    {% else %}
+      <div class="card-body">
+        <div class="empty">
+          <div class="empty-icon"><i class="ti ti-history icon-lg"></i></div>
+          <p class="empty-title">Nothing recorded yet</p>
+          <p class="empty-subtitle text-secondary">
+            Sign-ins and changes to zones, records and users will appear here.
+          </p>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}

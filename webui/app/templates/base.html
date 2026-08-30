@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% block title %}{{ site_name }}{% endblock %}</title>
+  {# Tabler is vendored into the image at build time -- no CDN, so the panel
+     works on an isolated network and the CSP can stay at 'self'. #}
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/tabler/tabler.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/tabler/tabler-icons.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/svg+xml">
+  {# Loaded in <head> so the stored theme is applied before first paint. #}
+  <script src="{{ url_for('static', filename='vendor/tabler/tabler-theme.min.js') }}"></script>
+</head>
+<body>
+<div class="page">
+
+  {% if current_user %}
+  <aside class="navbar navbar-vertical navbar-expand-lg" data-bs-theme="dark">
+    <div class="container-fluid">
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse"
+              data-bs-target="#sidebar-menu" aria-controls="sidebar-menu"
+              aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="navbar-brand navbar-brand-autodark">
+        <a href="{{ url_for('dashboard.index') }}" class="d-flex align-items-center text-decoration-none">
+          <span class="avatar avatar-sm bg-primary-lt me-2"><i class="ti ti-world-www"></i></span>
+          <span class="fw-bold">{{ site_name }}</span>
+        </a>
+      </div>
+
+      <div class="collapse navbar-collapse" id="sidebar-menu">
+        <ul class="navbar-nav pt-lg-3">
+          <li class="nav-item {{ 'active' if request.endpoint == 'dashboard.index' }}">
+            <a class="nav-link" href="{{ url_for('dashboard.index') }}">
+              <span class="nav-link-icon"><i class="ti ti-home"></i></span>
+              <span class="nav-link-title">Dashboard</span>
+            </a>
+          </li>
+          <li class="nav-item {{ 'active' if request.blueprint == 'zones' }}">
+            <a class="nav-link" href="{{ url_for('zones.index') }}">
+              <span class="nav-link-icon"><i class="ti ti-list-details"></i></span>
+              <span class="nav-link-title">Zones</span>
+            </a>
+          </li>
+          {% if current_user.is_admin %}
+          <li class="nav-item dropdown {{ 'active' if request.blueprint == 'admin' }}">
+            <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown"
+               role="button" aria-expanded="false">
+              <span class="nav-link-icon"><i class="ti ti-settings"></i></span>
+              <span class="nav-link-title">Administration</span>
+            </a>
+            <div class="dropdown-menu">
+              <a class="dropdown-item" href="{{ url_for('admin.users') }}">
+                <i class="ti ti-users me-2"></i>Users
+              </a>
+              <a class="dropdown-item" href="{{ url_for('admin.audit_log') }}">
+                <i class="ti ti-history me-2"></i>Audit log
+              </a>
+              <a class="dropdown-item" href="{{ url_for('admin.settings') }}">
+                <i class="ti ti-adjustments me-2"></i>Settings
+              </a>
+            </div>
+          </li>
+          {% endif %}
+        </ul>
+      </div>
+    </div>
+  </aside>
+
+  <header class="navbar navbar-expand-md d-print-none">
+    <div class="container-xl">
+      <div class="navbar-nav flex-row order-md-last align-items-center">
+        <div class="nav-item me-2">
+          <a href="?theme=dark" class="nav-link px-0 hide-theme-dark" title="Switch to dark mode"
+             aria-label="Switch to dark mode">
+            <i class="ti ti-moon"></i>
+          </a>
+          <a href="?theme=light" class="nav-link px-0 hide-theme-light" title="Switch to light mode"
+             aria-label="Switch to light mode">
+            <i class="ti ti-sun"></i>
+          </a>
+        </div>
+        <div class="nav-item dropdown">
+          <a href="#" class="nav-link d-flex lh-1 p-0 px-2" data-bs-toggle="dropdown"
+             aria-label="Open user menu" aria-expanded="false">
+            <span class="avatar avatar-sm bg-primary-lt">{{ current_user.initials }}</span>
+            <div class="d-none d-xl-block ps-2">
+              <div>{{ current_user.label }}</div>
+              <div class="mt-1 small text-secondary">{{ current_user.role|capitalize }}</div>
+            </div>
+          </a>
+          <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
+            <a href="{{ url_for('profile.index') }}" class="dropdown-item">
+              <i class="ti ti-user me-2"></i>My profile
+            </a>
+            <div class="dropdown-divider"></div>
+            <form method="post" action="{{ url_for('auth.logout') }}" class="px-0">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="dropdown-item text-danger">
+                <i class="ti ti-logout me-2"></i>Sign out
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+  {% endif %}
+
+  <div class="page-wrapper">
+    {% block page_header %}
+      {% if self.header_title() | trim %}
+      <div class="page-header d-print-none">
+        <div class="container-xl">
+          <div class="row g-2 align-items-center">
+            <div class="col">
+              {% if self.header_pretitle() | trim %}
+                <div class="page-pretitle">{% block header_pretitle %}{% endblock %}</div>
+              {% endif %}
+              <h2 class="page-title">{% block header_title %}{% endblock %}</h2>
+              {% if self.header_subtitle() | trim %}
+                <div class="text-secondary mt-1">{% block header_subtitle %}{% endblock %}</div>
+              {% endif %}
+            </div>
+            <div class="col-auto ms-auto d-print-none">
+              {% block header_actions %}{% endblock %}
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    {% endblock %}
+
+    <div class="page-body">
+      <div class="container-xl">
+        {% include "partials/_flash.html" %}
+        {% block content %}{% endblock %}
+      </div>
+    </div>
+
+    <footer class="footer footer-transparent d-print-none">
+      <div class="container-xl">
+        <div class="row text-center align-items-center flex-row-reverse">
+          <div class="col-lg-auto ms-lg-auto">
+            <ul class="list-inline list-inline-dots mb-0">
+              <li class="list-inline-item text-secondary">
+                PowerDNS admin panel v{{ app_version }}
+              </li>
+            </ul>
+          </div>
+          <div class="col-12 col-lg-auto mt-3 mt-lg-0">
+            <span class="text-secondary">Theme by
+              <a href="https://tabler.io" class="link-secondary" rel="noopener noreferrer"
+                 target="_blank">Tabler</a>
+            </span>
+          </div>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='vendor/tabler/tabler.min.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

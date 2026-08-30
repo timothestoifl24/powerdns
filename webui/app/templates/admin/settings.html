@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Settings · {{ site_name }}{% endblock %}
+{% block header_pretitle %}Administration{% endblock %}
+{% block header_title %}Settings{% endblock %}
+{% block header_subtitle %}
+  Read-only. These come from the environment — edit <code>.env</code> and restart
+  the container to change them.
+{% endblock %}
+
+{% block content %}
+  <div class="row row-cards">
+
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">PowerDNS</h3></div>
+        <div class="card-body">
+          <dl class="row mb-0">
+            <dt class="col-5 text-secondary">API endpoint</dt>
+            <dd class="col-7 font-monospace">{{ pdns_url }}</dd>
+            <dt class="col-5 text-secondary">Status</dt>
+            <dd class="col-7">
+              {% if pdns_status.reachable %}
+                <span class="badge bg-success-lt"><i class="ti ti-check me-1"></i>Reachable</span>
+              {% else %}
+                <span class="badge bg-red-lt"><i class="ti ti-x me-1"></i>Unreachable</span>
+              {% endif %}
+            </dd>
+            <dt class="col-5 text-secondary">Version</dt>
+            <dd class="col-7">{{ pdns_status.version }}</dd>
+            {% if pdns_status.error %}
+              <dt class="col-5 text-secondary">Error</dt>
+              <dd class="col-7 text-danger small">{{ pdns_status.error }}</dd>
+            {% endif %}
+            <dt class="col-5 text-secondary">Default nameservers</dt>
+            <dd class="col-7 font-monospace">
+              {{ default_nameservers | join(', ') if default_nameservers else '—' }}
+            </dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="card mt-3">
+        <div class="card-header"><h3 class="card-title">Session and proxy</h3></div>
+        <div class="card-body">
+          <dl class="row mb-0">
+            <dt class="col-5 text-secondary">Public URL</dt>
+            <dd class="col-7 font-monospace">{{ base_url or 'derived from the request' }}</dd>
+            <dt class="col-5 text-secondary">Session lifetime</dt>
+            <dd class="col-7">{{ session_minutes }} minutes</dd>
+            <dt class="col-5 text-secondary">Secure cookie</dt>
+            <dd class="col-7">
+              {% if cookie_secure %}
+                <span class="badge bg-success-lt">on</span>
+              {% else %}
+                <span class="badge bg-yellow-lt">off — HTTP only</span>
+              {% endif %}
+            </dd>
+            <dt class="col-5 text-secondary">Trusted proxies</dt>
+            <dd class="col-7">{{ proxy_count }}</dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">Authentication</h3></div>
+        <div class="list-group list-group-flush">
+
+          <div class="list-group-item">
+            <div class="row align-items-center">
+              <div class="col-auto"><i class="ti ti-user icon"></i></div>
+              <div class="col">
+                <div class="fw-medium">Local accounts</div>
+                <div class="text-secondary small">Username and password stored by this panel</div>
+              </div>
+              <div class="col-auto">
+                {% if auth.local_enabled %}
+                  <span class="badge bg-success-lt">enabled</span>
+                {% else %}
+                  <span class="badge bg-secondary-lt">disabled</span>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+          <div class="list-group-item">
+            <div class="row align-items-center">
+              <div class="col-auto"><i class="ti ti-server icon"></i></div>
+              <div class="col">
+                <div class="fw-medium">LDAP / Active Directory</div>
+                {% if auth.ldap.enabled %}
+                  <div class="text-secondary small font-monospace">{{ auth.ldap.uri }}</div>
+                  <div class="text-secondary small">
+                    base {{ auth.ldap.base_dn }} · attribute {{ auth.ldap.username_attribute }}
+                  </div>
+                {% else %}
+                  <div class="text-secondary small">Set LDAP_ENABLED=true to configure</div>
+                {% endif %}
+              </div>
+              <div class="col-auto">
+                {% if auth.ldap.enabled %}
+                  <span class="badge bg-success-lt">enabled</span>
+                {% else %}
+                  <span class="badge bg-secondary-lt">disabled</span>
+                {% endif %}
+              </div>
+            </div>
+            {% if auth.ldap.enabled %}
+              {% with roles = auth.ldap.roles %}
+                {% include "admin/_role_map.html" %}
+              {% endwith %}
+            {% endif %}
+          </div>
+
+          {% for provider in auth.oauth_providers %}
+            <div class="list-group-item">
+              <div class="row align-items-center">
+                <div class="col-auto"><i class="ti {{ provider.icon }} icon"></i></div>
+                <div class="col">
+                  <div class="fw-medium">{{ provider.display_name }}</div>
+                  <div class="text-secondary small">
+                    {{ 'OpenID Connect' if provider.is_oidc else 'OAuth 2.0' }} ·
+                    <span class="font-monospace">{{ provider.name }}</span>
+                  </div>
+                  <div class="text-secondary small">
+                    Redirect URI:
+                    <span class="font-monospace">{{ (base_url or request.host_url.rstrip('/')) }}{{ url_for('auth.oauth_callback', provider=provider.name) }}</span>
+                  </div>
+                </div>
+                <div class="col-auto"><span class="badge bg-success-lt">enabled</span></div>
+              </div>
+              {% with roles = provider.roles %}
+                {% include "admin/_role_map.html" %}
+              {% endwith %}
+            </div>
+          {% endfor %}
+
+          <div class="list-group-item">
+            <div class="row align-items-center">
+              <div class="col-auto"><i class="ti ti-shield-lock icon"></i></div>
+              <div class="col">
+                <div class="fw-medium">SAML 2.0</div>
+                {% if auth.saml.enabled %}
+                  <div class="text-secondary small">
+                    Metadata:
+                    <a href="{{ url_for('auth.saml_metadata') }}" class="font-monospace">
+                      {{ url_for('auth.saml_metadata') }}
+                    </a>
+                  </div>
+                {% else %}
+                  <div class="text-secondary small">Set SAML_ENABLED=true to configure</div>
+                {% endif %}
+              </div>
+              <div class="col-auto">
+                {% if auth.saml.enabled %}
+                  <span class="badge bg-success-lt">enabled</span>
+                {% else %}
+                  <span class="badge bg-secondary-lt">disabled</span>
+                {% endif %}
+              </div>
+            </div>
+            {% if auth.saml.enabled %}
+              {% with roles = auth.saml.roles %}
+                {% include "admin/_role_map.html" %}
+              {% endwith %}
+            {% endif %}
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

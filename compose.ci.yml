@@ -1,0 +1,13 @@
+# Overrides used only by the CI smoke test.
+#
+# Applied via COMPOSE_FILE=compose.yml:compose.ci.yml, so the workflow still
+# calls plain `docker compose` and exercises the real compose.yml alongside it.
+
+services:
+  pdns:
+    environment:
+      # PowerDNS keeps the list of zones in memory and refreshes it every
+      # zone-cache-refresh-interval seconds (300 by default), so a zone created
+      # through the API seconds ago can be invisible to a query for minutes.
+      # 0 disables the cache, which is what makes the smoke test deterministic.
+      PDNS_SETTING_zone_cache_refresh_interval: "0"

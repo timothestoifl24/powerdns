@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Zones · {{ site_name }}{% endblock %}
+{% block header_pretitle %}{{ zones | length }} zone{{ '' if zones | length == 1 else 's' }}{% endblock %}
+{% block header_title %}Zones{% endblock %}
+{% block header_actions %}
+  {% if current_user.is_operator %}
+    <a href="{{ url_for('zones.create') }}" class="btn btn-primary">
+      <i class="ti ti-plus me-2"></i>New zone
+    </a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div class="card-header">
+      <form method="get" class="d-flex w-100" role="search">
+        <div class="input-icon w-100">
+          <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+          <input type="search" name="q" value="{{ query }}" class="form-control"
+                 placeholder="Filter zones by name" aria-label="Filter zones">
+        </div>
+        {% if query %}
+          <a href="{{ url_for('zones.index') }}" class="btn ms-2">Clear</a>
+        {% endif %}
+      </form>
+    </div>
+
+    {% if zones %}
+      <div class="table-responsive">
+        <table class="table card-table table-vcenter table-hover">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Kind</th>
+              <th>Serial</th>
+              <th>DNSSEC</th>
+              <th class="w-1"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for zone in zones %}
+              <tr>
+                <td>
+                  <a href="{{ url_for('zones.detail', zone_id=zone.id) }}"
+                     class="text-reset fw-medium">{{ zone.name }}</a>
+                </td>
+                <td><span class="badge bg-secondary-lt">{{ zone.kind }}</span></td>
+                <td class="text-secondary font-monospace">{{ zone.serial | default('—') }}</td>
+                <td>
+                  {% if zone.dnssec %}
+                    <span class="badge bg-success-lt"><i class="ti ti-lock me-1"></i>Signed</span>
+                  {% else %}
+                    <span class="text-secondary">Unsigned</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <a href="{{ url_for('zones.detail', zone_id=zone.id) }}"
+                     class="btn btn-sm" aria-label="Open {{ zone.name }}">
+                    Open <i class="ti ti-chevron-right ms-1"></i>
+                  </a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="card-body">
+        <div class="empty">
+          <div class="empty-icon"><i class="ti ti-search-off icon-lg"></i></div>
+          <p class="empty-title">
+            {% if query %}No zones match “{{ query }}”{% else %}No zones yet{% endif %}
+          </p>
+          <p class="empty-subtitle text-secondary">
+            {% if query %}
+              Try a different search term.
+            {% elif current_user.is_operator %}
+              Create a zone to start serving DNS records.
+            {% else %}
+              No zones have been shared with your account yet.
+            {% endif %}
+          </p>
+          {% if not query and current_user.is_operator %}
+            <div class="empty-action">
+              <a href="{{ url_for('zones.create') }}" class="btn btn-primary">
+                <i class="ti ti-plus me-2"></i>New zone
+              </a>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}

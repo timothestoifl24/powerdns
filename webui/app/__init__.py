@@ -56,7 +56,12 @@ def create_app(overrides: dict | None = None) -> Flask:
             x_host=proxy_count,
             x_port=proxy_count,
         )
-        log.info("trusting %d reverse prox(ies) for forwarded headers", proxy_count)
+        # Whether ProxyFix is on is the useful signal in a container log -- the
+        # common misconfiguration is it being off behind a proxy. The hop count
+        # itself is already on the settings page, which is where an operator
+        # checks it, so interpolating an environment-derived value here would
+        # add nothing and log a configuration value for no benefit.
+        log.info("ProxyFix enabled: forwarded headers will be trusted")
 
     database.init_app(app)
 

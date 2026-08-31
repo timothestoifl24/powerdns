@@ -11,7 +11,7 @@ psycopg[binary]>=3.3.4,<4.0
 requests>=2.34.2,<3.0
 
 # DNS record validation
-dnspython>=2.7,<3.0
+dnspython>=2.8.0,<3.0
 
 # Authentication backends
 Authlib>=1.7.2,<2.0     # OAuth 2.0 / OpenID Connect

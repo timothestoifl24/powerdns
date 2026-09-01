@@ -98,8 +98,8 @@ plain environment variable instead of a file — each one accepts both `FOO` and
 │   └── pdns.conf.template
 ├── recursor/
 │   ├── Dockerfile            Debian trixie + pdns-recursor
-│   ├── entrypoint.sh         renders recursor.conf
-│   └── recursor.conf.template
+│   ├── entrypoint.sh         renders recursor.yml
+│   └── recursor.yml.template
 ├── webui/
 │   ├── Dockerfile            Tabler vendored at build time, then the Flask app
 │   ├── app/                  the panel

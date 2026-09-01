@@ -257,8 +257,9 @@ moving to a different major version.
 
 ## Configuring the recursor
 
-Common settings have their own variables. Anything else the recursor understands
-can be set with a `RECURSOR_SETTING_` prefix, where underscores become dashes:
+Common settings have their own variables. Anything else the recursor
+understands goes in `RECURSOR_EXTRA_YAML`, which is written verbatim into the
+recursor's include directory:
 
 ```yaml
 services:
@@ -267,13 +268,26 @@ services:
       RECURSOR_ALLOW_FROM: 10.0.0.0/8,192.168.0.0/16
       RECURSOR_DNSSEC: validate
       RECURSOR_THREADS: "4"
-      RECURSOR_SETTING_max_cache_entries: "2000000"   # -> max-cache-entries=…
-      RECURSOR_SETTING_serve_rfc1918: "no"            # -> serve-rfc1918=no
+      RECURSOR_EXTRA_YAML: |
+        recordcache:
+          max_entries: 2000000
+        recursor:
+          serve_rfc1918: false
 ```
 
-These are written to `00-env-overrides.conf` in the recursor's API config
-directory, which it reads through `include-dir`. The full list of settings is in
-the [PowerDNS Recursor documentation](https://doc.powerdns.com/recursor/settings.html).
+It is real recursor YAML rather than a syntax of ours, so the
+[settings reference](https://doc.powerdns.com/recursor/yamlsettings.html)
+applies directly. Note the sections: settings are grouped under `incoming`,
+`recursor`, `webservice`, `dnssec`, `logging` and so on.
+
+### Why YAML and not the classic settings file
+
+PowerDNS Recursor 5.2 stopped reading the old `key=value` syntax unless
+`--enable-old-settings` is passed, and that option is documented as going away
+in a future release. Debian trixie ships 5.2, so this container writes YAML.
+Old-style names map onto YAML as `section.name` with dashes becoming
+underscores: `allow-from` is `incoming.allow_from`, `api-config-dir` is
+`webservice.api_dir`, `dnssec` is `dnssec.validation`.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
@@ -285,6 +299,7 @@ the [PowerDNS Recursor documentation](https://doc.powerdns.com/recursor/settings
 | `AUTH_DNS_BIND_ADDRESS` / `AUTH_DNS_PORT` | `127.0.0.1` / `5300` | Publishes the authoritative server directly, for debugging. |
 | `BACKEND_SUBNET` | `172.29.0.0/24` | The compose network. |
 | `PDNS_STATIC_IP` | `172.29.0.10` | The authoritative server's fixed address; must be inside `BACKEND_SUBNET`. |
+| `RECURSOR_EXTRA_YAML` | — | Extra recursor YAML, merged after the generated config. |
 
 ### Why the authoritative server has a fixed address
 
@@ -307,11 +322,12 @@ running configuration allows `0.0.0.0/0`.
 
 ### Where forward zones are stored
 
-The recursor writes one config fragment per zone into its `api-config-dir` and
-reads them back through `include-dir` at start — the two settings point at the
-same directory, which is what makes the zones survive a restart. That directory
-is the `recursor-api` volume. The panel keeps no copy of its own, so what the
-Forwarding page shows is always what the resolver is actually doing.
+The recursor writes them into an `apizones` file in `webservice.api_dir` and
+reads it back at start, which is what makes them survive a restart. That
+directory is the `recursor-api` volume, and it is deliberately *not* the same
+as `recursor.include_dir` — under YAML settings the recursor requires the two
+to differ. The panel keeps no copy of its own, so what the Forwarding page
+shows is always what the resolver is actually doing.
 
 ## Running the panel outside compose
 

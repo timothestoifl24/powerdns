@@ -89,6 +89,23 @@ zone; until they are published, the zone is signed but not yet part of the chain
 of trust. PowerDNS maintains the RRSIG, NSEC and DNSKEY records itself, which is
 why they are read-only in the record table.
 
+## Forwarding
+
+[![The forwarding page, with global forwarders above a table of forward zones](/screenshots/forwarding.png)](/screenshots/forwarding.png)
+
+Where queries go when they are not for a zone this server holds. **Global
+forwarders** catch everything with no more specific rule; a **forward zone**
+sends one namespace — an internal domain, a reverse zone, an Active Directory
+domain — to particular servers.
+
+The rules marked **local zone** are maintained for you: the recursor is what
+clients query, so each zone the authoritative server holds needs one pointing
+back at it. Creating or deleting a zone updates them.
+
+Forwarders are IP addresses, not host names. A resolver reads them before it is
+able to resolve anything, so a name there would produce a zone that silently
+never answers — the form says so rather than saving it.
+
 ## Users
 
 [![The user administration page listing local users, their roles and zone counts](/screenshots/users.png)](/screenshots/users.png)

@@ -17,14 +17,15 @@ RUN set -eux; \
         ca-certificates; \
     rm -rf /var/lib/apt/lists/*; \
     rm -f /usr/sbin/policy-rc.d; \
-    # The package ships a config of its own, and on Recursor 5 a recursor.yml
-    # silently takes precedence over the recursor.conf we render. Remove both
-    # so the only configuration is the one the entrypoint writes.
+    # The package ships a recursor.conf of its own. Recursor 5.2 tries the
+    # YAML form first and refuses old-style settings without
+    # --enable-old-settings, so leaving it behind means a failed parse at every
+    # start. Remove both forms; the entrypoint writes the only configuration.
     rm -f /etc/powerdns/recursor.conf /etc/powerdns/recursor.yml; \
-    rm -f /etc/powerdns/recursor.d/*; \
+    rm -rf /etc/powerdns/recursor.d; \
     install -d -m 0755 -o pdns -g pdns /var/run/pdns-recursor
 
-COPY recursor.conf.template /usr/share/pdns-recursor/recursor.conf.template
+COPY recursor.yml.template /usr/share/pdns-recursor/recursor.yml.template
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 0755 /usr/local/bin/entrypoint.sh
 

@@ -484,15 +484,19 @@ jobs:
           set -euo pipefail
           # allow-from is what keeps this off the list of resolvers used to
           # amplify attacks on other people. Prove the default is narrow by
-          # checking the running configuration.
+          # reading it back out of the running configuration.
           allow=$(docker compose exec -T recursor \
-                    grep '^allow-from=' /etc/powerdns/recursor.conf)
+                    sed -n '/^incoming:/,/^[a-z]/p' /etc/powerdns/recursor.yml \
+                    | grep 'allow_from:')
           echo "$allow"
           case "$allow" in
             *0.0.0.0/0*|*"::/0"*)
               echo "::error::the recursor is configured as an open resolver"
               exit 1 ;;
           esac
+          # And it really is the file the recursor read: a config it could not
+          # parse would have stopped the container long before this step.
+          docker compose exec -T recursor test -s /etc/powerdns/recursor.yml
 
       - name: The zone shows up in the panel for the administrator
         run: |

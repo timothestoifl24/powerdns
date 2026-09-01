@@ -291,17 +291,59 @@ jobs:
             http://localhost:9191/forwarding/sync \
             --data-urlencode "csrf_token=$(cat /tmp/panel.csrf)"
 
+          # What the recursor actually knows, before any dig. A silent retry
+          # loop cannot distinguish "the rule was never created" from "the
+          # rule exists but the query never arrives", and those have entirely
+          # different fixes.
+          echo "--- what the recursor is forwarding, and where pdns is ---"
+          docker compose exec -T webui python - "$(cat secrets/recursor_api_key)" <<'PY'
+          import json, socket, sys, urllib.request
+
+          request = urllib.request.Request(
+              "http://recursor:8082/api/v1/servers/localhost/zones",
+              headers={"X-API-Key": sys.argv[1]},
+          )
+          with urllib.request.urlopen(request, timeout=10) as response:
+              zones = json.load(response)
+          forwarded = {z["name"]: z["servers"] for z in zones if z["kind"] == "Forwarded"}
+          print("forwarded:", json.dumps(forwarded, indent=2, sort_keys=True))
+          print("pdns resolves to:", socket.gethostbyname("pdns"))
+          print("recursor resolves to:", socket.gethostbyname("recursor"))
+          PY
+
           for attempt in $(seq 1 12); do
             answer=$(dig +short @127.0.0.1 -p 5353 www.smoke.test A || true)
             [ "$answer" = "192.0.2.42" ] && break
-            echo "attempt $attempt: got '${answer:-<empty>}', retrying"
+            echo "attempt $attempt: got '${answer:-<empty>}'"
+            # The rcode is the diagnosis: REFUSED means allow-from, SERVFAIL
+            # means the forward target did not answer, no reply at all means
+            # nothing is listening on the published port.
+            dig @127.0.0.1 -p 5353 www.smoke.test A +time=3 +tries=1 \
+              | grep -E 'status:|ANSWER:|connection timed out|no servers' || true
             sleep 5
           done
           echo "dig via the recursor returned: ${answer:-<empty>}"
           if [ "$answer" != "192.0.2.42" ]; then
             echo "::error::the recursor did not answer for an authoritative zone"
-            dig @127.0.0.1 -p 5353 www.smoke.test A || true
-            docker compose logs --tail 50 recursor
+            echo "--- is the recursor listening on 53 at all? ---"
+            docker compose exec -T recursor timeout 2 bash -c '</dev/tcp/127.0.0.1/53' \
+              && echo "port 53 inside the container: open" \
+              || echo "port 53 inside the container: CLOSED"
+            echo "--- straight at the recursor from inside the network ---"
+            docker compose exec -T webui python -c "
+          import socket
+          s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(4)
+          # A minimal A query for www.smoke.test, so this does not need dig.
+          q = (b'\xab\xcd\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00'
+               b'\x03www\x05smoke\x04test\x00\x00\x01\x00\x01')
+          try:
+              s.sendto(q, ('recursor', 53))
+              data, _ = s.recvfrom(512)
+              print('recursor replied, rcode', data[3] & 0x0F, 'answers', data[7])
+          except Exception as exc:
+              print('no reply from recursor:53 --', type(exc).__name__, exc)
+          " || true
+            docker compose logs --tail 80 recursor
             exit 1
           fi
 

@@ -120,7 +120,14 @@ services:
       # replaced.
       - recursor-api:/var/lib/powerdns-recursor/api
     healthcheck:
-      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/8082' || exit 1"]
+      # Both ports: the API the panel drives, and the DNS port clients use.
+      # Checking only the API would let a recursor that never bound :53 report
+      # itself healthy, and the first sign would be every lookup failing.
+      test:
+        - CMD-SHELL
+        - >-
+          timeout 2 bash -c '</dev/tcp/127.0.0.1/8082' &&
+          timeout 2 bash -c '</dev/tcp/127.0.0.1/53' || exit 1
       interval: 10s
       timeout: 5s
       retries: 5

@@ -311,6 +311,14 @@ jobs:
           print("recursor resolves to:", socket.gethostbyname("recursor"))
           PY
 
+          # The recursor hands a reloaded zone map to its worker threads
+          # asynchronously: a query in the moment right after the reload can
+          # still be resolved the old way, and that answer then sits in the
+          # packet cache for a minute. Give it a moment to settle, and flush
+          # between attempts so one unlucky first query cannot decide the
+          # result of the whole loop. The overall deadline is unchanged, so a
+          # forward zone that genuinely does not work still fails here.
+          sleep 5
           for attempt in $(seq 1 12); do
             answer=$(dig +short @127.0.0.1 -p 5353 www.smoke.test A || true)
             [ "$answer" = "192.0.2.42" ] && break
@@ -320,6 +328,11 @@ jobs:
             # nothing is listening on the published port.
             dig @127.0.0.1 -p 5353 www.smoke.test A +time=3 +tries=1 \
               | grep -E 'status:|ANSWER:|connection timed out|no servers' || true
+            # The recursor's API port is deliberately not published, so this
+            # goes through rec_control inside the container. The trailing $
+            # makes it wipe the subtree rather than the exact name only.
+            docker compose exec -T recursor rec_control wipe-cache 'smoke.test$' \
+              >/dev/null 2>&1 || true
             sleep 5
           done
           echo "dig via the recursor returned: ${answer:-<empty>}"
@@ -386,10 +399,16 @@ jobs:
             --data-urlencode "servers=${PDNS_STATIC_IP:-172.29.0.10}" \
             --data-urlencode "csrf_token=$(cat /tmp/panel.csrf)"
 
+          # Same settle-and-flush as above: the reloaded zone map reaches the
+          # worker threads asynchronously, and a query that lands before it
+          # does is answered the old way and cached for a minute.
+          sleep 5
           for attempt in $(seq 1 12); do
             answer=$(dig +short @127.0.0.1 -p 5353 host.fwd.test A || true)
             [ "$answer" = "192.0.2.77" ] && break
             echo "attempt $attempt: got '${answer:-<empty>}', retrying"
+            docker compose exec -T recursor rec_control wipe-cache 'fwd.test$' \
+              >/dev/null 2>&1 || true
             sleep 5
           done
           echo "forward zone resolved to: ${answer:-<empty>}"
@@ -451,10 +470,13 @@ jobs:
             --data-urlencode "servers=${PDNS_STATIC_IP:-172.29.0.10}" \
             --data-urlencode "csrf_token=$(cat /tmp/panel.csrf)"
 
+          sleep 5
           for attempt in $(seq 1 12); do
             answer=$(dig +short @127.0.0.1 -p 5353 host.global.test A || true)
             [ "$answer" = "192.0.2.88" ] && break
             echo "attempt $attempt: got '${answer:-<empty>}', retrying"
+            docker compose exec -T recursor rec_control wipe-cache 'global.test$' \
+              >/dev/null 2>&1 || true
             sleep 5
           done
           echo "after global forwarders: ${answer:-<empty>}"
@@ -512,6 +534,8 @@ jobs:
             answer=$(dig +short @127.0.0.1 -p 5353 host.fwd.test A || true)
             [ "$answer" = "192.0.2.77" ] && break
             echo "attempt $attempt: got '${answer:-<empty>}', retrying"
+            docker compose exec -T recursor rec_control wipe-cache 'fwd.test$' \
+              >/dev/null 2>&1 || true
             sleep 5
           done
           echo "after restart: ${answer:-<empty>}"

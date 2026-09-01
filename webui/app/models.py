@@ -59,6 +59,19 @@ class User(Base):
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     role: Mapped[str] = mapped_column(String(20), nullable=False, default=ROLE_USER)
+
+    #: Set when an administrator picks this user's role by hand. External
+    #: accounts normally have their role recomputed from directory groups on
+    #: every sign-in; this pins it so the manual choice survives. Clearing it
+    #: hands the role back to the group mapping.
+    role_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    #: The groups the directory or IdP reported at the last sign-in, newline
+    #: separated. Kept purely so an administrator can see what the panel was
+    #: given: "user is in the admin group but is not an admin" is otherwise
+    #: only answerable by reading container logs.
+    last_groups: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -95,6 +108,16 @@ class User(Base):
         return self.auth_source == AUTH_LOCAL
 
     @property
+    def directory_groups(self) -> list[str]:
+        """Groups seen at the last sign-in, one per line, blanks dropped."""
+        return [line.strip() for line in (self.last_groups or "").splitlines() if line.strip()]
+
+    @property
+    def role_is_directory_managed(self) -> bool:
+        """Whether the next sign-in will recompute this user's role."""
+        return not self.is_local and not self.role_locked
+
+    @property
     def label(self) -> str:
         return self.display_name or self.username
 
@@ -123,7 +146,10 @@ class User(Base):
         return sorted(grant.zone for grant in self.zone_grants)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
-        return f"<User {self.username} role={self.role} source={self.auth_source}>"
+        return (
+            f"<User {self.username} role={self.role} source={self.auth_source} "
+            f"locked={self.role_locked}>"
+        )
 
 
 class ZoneAccess(Base):
@@ -231,8 +257,20 @@ class AuthProviderConfig(Base):
         return value if isinstance(value, dict) else {}
 
     def setting(self, key: str, default=""):
+        """One stored setting, falling back to ``default``.
+
+        A blank value counts as absent. The provider form posts every field it
+        renders, so clearing one stores ``""`` rather than removing the key --
+        and without this a cleared "Group attribute" would mean "no attribute"
+        instead of "the default", quietly costing every user their group
+        membership and therefore their role.
+        """
         value = self.settings.get(key, default)
-        return default if value is None else value
+        if value is None:
+            return default
+        if isinstance(value, str) and not value.strip():
+            return default
+        return value
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<AuthProviderConfig {self.kind}:{self.name} enabled={self.enabled}>"

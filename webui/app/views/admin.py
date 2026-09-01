@@ -167,9 +167,22 @@ def update_user(user_id: int):
     if user.role != role:
         changes.append(f"role {user.role}->{role}")
         user.role = role
+        if not user.is_local:
+            # Without this the group mapping recomputes the role at this
+            # person's next sign-in and the change silently disappears. An
+            # administrator picking a role by hand means it, so pin it; the
+            # checkbox below is how they hand it back to the directory.
+            user.role_locked = True
     if user.is_active != is_active:
         changes.append("activated" if is_active else "deactivated")
         user.is_active = is_active
+
+    if not user.is_local and request.form.get("role_from_directory") == "on":
+        # Explicitly handing the role back: the group mapping applies again
+        # from the next sign-in, including demoting this account.
+        if user.role_locked:
+            changes.append("role handed back to the group mapping")
+        user.role_locked = False
 
     if user.is_local:
         user.display_name = (request.form.get("display_name") or "").strip()[:190]

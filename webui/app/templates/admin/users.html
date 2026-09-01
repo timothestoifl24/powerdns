@@ -51,6 +51,10 @@
                                        'user': 'bg-secondary-lt'} %}
                 <span class="badge {{ role_colours.get(user.role, 'bg-secondary-lt') }}">
                   {{ user.role }}
+                  {%- if user.role_locked %}
+                    <i class="ti ti-lock ms-1"
+                       title="Set by an administrator; the group mapping will not change it"></i>
+                  {%- endif %}
                 </span>
                 {% if not user.is_active %}
                   <span class="badge bg-secondary-lt ms-1">disabled</span>

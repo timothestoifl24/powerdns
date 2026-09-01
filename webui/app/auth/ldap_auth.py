@@ -89,19 +89,82 @@ def _service_connection(config: LdapConfig, server: Server) -> Connection:
         raise LdapAuthError(f"Cannot reach the LDAP server at {config.uri}: {exc}") from exc
 
 
+#: Used when a group search base is configured but no filter. Covers the three
+#: ways a directory records membership on the group object: ``groupOfNames``
+#: (member), ``groupOfUniqueNames`` (uniqueMember) and ``posixGroup``
+#: (memberUid). Giving a base without a filter used to search for nothing at
+#: all, which looks exactly like "the user is in no groups".
+DEFAULT_GROUP_FILTER = "(|(member={dn})(uniqueMember={dn})(memberUid={username}))"
+
+#: Matches Active Directory groups transitively, so a user in a group that is
+#: itself a member of the mapped group is counted. Offered in the UI and the
+#: documentation because nested groups are the usual reason an Active Directory
+#: account in the right group still comes out with the default role.
+AD_NESTED_GROUP_FILTER = "(member:1.2.840.113556.1.4.1941:={dn})"
+
+#: Attributes to try when the configured one yields nothing. Directories
+#: disagree about which of these they publish, and an operator who never
+#: touched the setting should still get their groups.
+FALLBACK_GROUP_ATTRIBUTES = ("memberOf", "isMemberOf", "memberof", "nsRole", "groupMembership")
+
+
+def attribute_value(entry: dict, name: str) -> list[str]:
+    """Read one attribute from an LDAP entry, ignoring the case of its name.
+
+    LDAP attribute names are case-insensitive by definition, but ldap3 hands
+    back a plain dict keyed by whatever spelling the server used. A dict lookup
+    is therefore case-*sensitive*, so a directory answering ``memberof`` while
+    the panel asks for ``memberOf`` silently produces no groups at all -- and
+    the user ends up with the default role instead of the one their group
+    grants. That failure is invisible: nothing errors, the sign-in succeeds.
+    """
+    if not name:
+        return []
+    raw = entry.get(name)
+    if raw is None:
+        wanted = name.lower()
+        for key, value in entry.items():
+            if isinstance(key, str) and key.lower() == wanted:
+                raw = value
+                break
+    if raw is None:
+        return []
+    values = raw if isinstance(raw, list | tuple) else [raw]
+    return [str(item) for item in values if str(item).strip()]
+
+
 def _groups_from_entry(config: LdapConfig, connection: Connection, entry) -> list[str]:
     """Group names for a user, from memberOf or from a group search."""
     groups: list[str] = []
 
-    raw = entry.get(config.group_attribute)
-    if raw:
-        groups.extend(str(item) for item in (raw if isinstance(raw, list) else [raw]))
+    groups.extend(attribute_value(entry, config.group_attribute))
+
+    # Nothing under the configured name: try the attributes directories
+    # actually use. A wrong or blank LDAP_GROUP_ATTRIBUTE is the most common
+    # reason a correctly configured admin group grants nothing.
+    if not groups:
+        for candidate in FALLBACK_GROUP_ATTRIBUTES:
+            if candidate.lower() == (config.group_attribute or "").lower():
+                continue
+            found = attribute_value(entry, candidate)
+            if found:
+                log.info(
+                    "LDAP: no values under %r; using %r instead. Set "
+                    "LDAP_GROUP_ATTRIBUTE (or the provider's group attribute) to %r "
+                    "to make this explicit.",
+                    config.group_attribute,
+                    candidate,
+                    candidate,
+                )
+                groups.extend(found)
+                break
 
     # posixGroup-style directories do not populate memberOf; they store members
     # on the group. Search for the groups this DN belongs to instead.
-    if config.group_search_base and config.group_filter:
+    if config.group_search_base:
         user_dn = escape_filter_value(str(entry.get("dn", "")))
-        search_filter = config.group_filter.replace("{dn}", user_dn).replace(
+        template = config.group_filter or DEFAULT_GROUP_FILTER
+        search_filter = template.replace("{dn}", user_dn).replace(
             "{username}", escape_filter_value(str(entry.get("username", "")))
         )
         try:
@@ -113,9 +176,22 @@ def _groups_from_entry(config: LdapConfig, connection: Connection, entry) -> lis
             for group in connection.entries:
                 names = group.entry_attributes_as_dict.get("cn") or []
                 groups.extend(str(name) for name in names)
+                # The DN matters as much as the CN: a mapping may be configured
+                # with either, and only the entry knows its own DN.
+                if group.entry_dn:
+                    groups.append(str(group.entry_dn))
         except LDAPException as exc:  # pragma: no cover - depends on directory
             log.warning("LDAP group search failed: %s", exc)
 
+    if not groups:
+        log.warning(
+            "LDAP: the directory reported no groups for this entry. Group-to-role "
+            "mapping cannot apply, so the default role is used. Check the group "
+            "attribute (%r) or configure a group search base. For nested Active "
+            "Directory groups use the group filter %s",
+            config.group_attribute,
+            AD_NESTED_GROUP_FILTER,
+        )
     return groups
 
 

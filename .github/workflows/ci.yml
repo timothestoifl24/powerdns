@@ -311,26 +311,36 @@ jobs:
           print("recursor resolves to:", socket.gethostbyname("recursor"))
           PY
 
-          # The recursor hands a reloaded zone map to its worker threads
-          # asynchronously: a query in the moment right after the reload can
-          # still be resolved the old way, and that answer then sits in the
-          # packet cache for a minute. Give it a moment to settle, and flush
-          # between attempts so one unlucky first query cannot decide the
-          # result of the whole loop. The overall deadline is unchanged, so a
-          # forward zone that genuinely does not work still fails here.
+          # Every attempt asks the same question twice: once from the host
+          # through the published port, and once from inside the compose
+          # network. Earlier runs showed the two disagreeing -- the in-network
+          # query forwarded correctly while the published-port query was
+          # resolved from the root -- and printing both on the same tick is
+          # what separates "the rule takes time to apply" from "it depends on
+          # where the query came from".
+          probe_inside() {
+            docker compose exec -T webui python -c "
+          import socket
+          s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(4)
+          q = (b'\xab\xcd\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00'
+               b'\x03www\x05smoke\x04test\x00\x00\x01\x00\x01')
+          try:
+              s.sendto(q, ('recursor', 53))
+              data, _ = s.recvfrom(512)
+              print('rcode', data[3] & 0x0F, 'answers', data[7])
+          except Exception as exc:
+              print('no reply --', type(exc).__name__)
+          " 2>/dev/null || echo "probe failed"
+          }
+
           sleep 5
-          for attempt in $(seq 1 12); do
+          for attempt in $(seq 1 10); do
             answer=$(dig +short @127.0.0.1 -p 5353 www.smoke.test A || true)
             [ "$answer" = "192.0.2.42" ] && break
-            echo "attempt $attempt: got '${answer:-<empty>}'"
-            # The rcode is the diagnosis: REFUSED means allow-from, SERVFAIL
-            # means the forward target did not answer, no reply at all means
-            # nothing is listening on the published port.
-            dig @127.0.0.1 -p 5353 www.smoke.test A +time=3 +tries=1 \
-              | grep -E 'status:|ANSWER:|connection timed out|no servers' || true
-            # The recursor's API port is deliberately not published, so this
-            # goes through rec_control inside the container. The trailing $
-            # makes it wipe the subtree rather than the exact name only.
+            status=$(dig @127.0.0.1 -p 5353 www.smoke.test A +time=3 +tries=1 \
+                     | grep -oP 'status: \K[A-Z]+' | head -1 || true)
+            printf 'attempt %2d  from host: %-10s (%s)   from inside: %s\n' \
+              "$attempt" "${answer:-<empty>}" "${status:-no reply}" "$(probe_inside)"
             docker compose exec -T recursor rec_control wipe-cache 'smoke.test$' \
               >/dev/null 2>&1 || true
             sleep 5

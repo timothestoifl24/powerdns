@@ -429,6 +429,43 @@ jobs:
           # volume. Without it every forward zone is lost when the container
           # is replaced, and nothing else in this job would notice.
           docker compose restart recursor
+          sleep 10
+
+          # Asked of the recursor's own API rather than with dig: the global
+          # forwarders set above also point at the authoritative server, so a
+          # query for host.fwd.test would still be answered even if this
+          # zone's rule had been lost. The zone list cannot pass for that
+          # reason.
+          docker compose exec -T webui python - "$(cat secrets/recursor_api_key)" <<'PY'
+          import json, sys, urllib.error, urllib.request
+
+          key = sys.argv[1]
+          request = urllib.request.Request(
+              "http://recursor:8082/api/v1/servers/localhost/zones",
+              headers={"X-API-Key": key},
+          )
+          for attempt in range(12):
+              try:
+                  with urllib.request.urlopen(request, timeout=10) as response:
+                      zones = json.load(response)
+                  break
+              except (urllib.error.URLError, TimeoutError) as exc:
+                  print("recursor not up yet:", exc)
+                  import time
+                  time.sleep(5)
+          else:
+              raise SystemExit("the recursor API never came back after the restart")
+
+          forwarded = {
+              zone["name"]: zone["servers"] for zone in zones if zone["kind"] == "Forwarded"
+          }
+          print("forwarded after restart:", json.dumps(forwarded, indent=2, sort_keys=True))
+          missing = [name for name in ("fwd.test.", ".", "smoke.test.") if name not in forwarded]
+          if missing:
+              raise SystemExit(f"lost after the restart: {missing}")
+          PY
+
+          # And it still answers.
           for attempt in $(seq 1 12); do
             answer=$(dig +short @127.0.0.1 -p 5353 host.fwd.test A || true)
             [ "$answer" = "192.0.2.77" ] && break

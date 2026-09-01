@@ -255,11 +255,71 @@ more closely, add `repo.powerdns.com` in that Dockerfile instead. The schema in
 `db/schema/powerdns.sql` matches 4.9 — check the upstream schema before
 moving to a different major version.
 
+## Configuring the recursor
+
+Common settings have their own variables. Anything else the recursor understands
+can be set with a `RECURSOR_SETTING_` prefix, where underscores become dashes:
+
+```yaml
+services:
+  recursor:
+    environment:
+      RECURSOR_ALLOW_FROM: 10.0.0.0/8,192.168.0.0/16
+      RECURSOR_DNSSEC: validate
+      RECURSOR_THREADS: "4"
+      RECURSOR_SETTING_max_cache_entries: "2000000"   # -> max-cache-entries=…
+      RECURSOR_SETTING_serve_rfc1918: "no"            # -> serve-rfc1918=no
+```
+
+These are written to `00-env-overrides.conf` in the recursor's API config
+directory, which it reads through `include-dir`. The full list of settings is in
+the [PowerDNS Recursor documentation](https://doc.powerdns.com/recursor/settings.html).
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `RECURSOR_ALLOW_FROM` | private networks + loopback | Who may use the resolver. **Never `0.0.0.0/0`** — see below. |
+| `RECURSOR_DNSSEC` | `process` | `process`, `validate` or `off`. |
+| `RECURSOR_THREADS` | `2` | |
+| `RECURSOR_LOGLEVEL` | `4` | |
+| `RECURSOR_VERSION_STRING` | `anonymous` | What a `version.bind` query returns. |
+| `AUTH_DNS_BIND_ADDRESS` / `AUTH_DNS_PORT` | `127.0.0.1` / `5300` | Publishes the authoritative server directly, for debugging. |
+| `BACKEND_SUBNET` | `172.29.0.0/24` | The compose network. |
+| `PDNS_STATIC_IP` | `172.29.0.10` | The authoritative server's fixed address; must be inside `BACKEND_SUBNET`. |
+
+### Why the authoritative server has a fixed address
+
+Forward targets in PowerDNS are IP addresses, never names: the recursor parses
+them at configuration time, before it has any way to resolve a name. So the
+recursor cannot be pointed at `pdns`, and the authoritative server gets a fixed
+address on the compose network instead — otherwise every local-zone forward rule
+would break the moment that container was recreated with a new address.
+
+Change `BACKEND_SUBNET` and `PDNS_STATIC_IP` together if the default subnet
+collides with a network your host already uses.
+
+### Do not make it an open resolver
+
+`RECURSOR_ALLOW_FROM` defaults to loopback and the private ranges. A recursor
+that answers the whole internet is found by scanners within days and used to
+amplify denial-of-service attacks against third parties, with your bandwidth.
+Widen it only to networks you control. The CI smoke test fails the build if the
+running configuration allows `0.0.0.0/0`.
+
+### Where forward zones are stored
+
+The recursor writes one config fragment per zone into its `api-config-dir` and
+reads them back through `include-dir` at start — the two settings point at the
+same directory, which is what makes the zones survive a restart. That directory
+is the `recursor-api` volume. The panel keeps no copy of its own, so what the
+Forwarding page shows is always what the resolver is actually doing.
+
 ## Running the panel outside compose
 
 The panel is an ordinary WSGI application; nothing ties it to this compose file.
 It needs three things: a PostgreSQL URL, the PowerDNS API endpoint and key, and a
-secret key.
+secret key. Add `RECURSOR_API_URL`, `RECURSOR_API_KEY` and `PDNS_DNS_ADDRESS` to
+enable the Forwarding page; leave them unset and it explains that forwarding is
+unavailable instead of failing.
 
 ```bash
 cd webui

@@ -124,8 +124,22 @@ def absolute_name(name: str, zone: str) -> str:
     return canonical(f"{name}.{zone_c.rstrip('.')}")
 
 
-class PdnsClient:
-    """Thin, synchronous wrapper around the PowerDNS API."""
+class ApiClient:
+    """Shared transport for the two PowerDNS HTTP APIs.
+
+    The Authoritative Server and the Recursor speak the same protocol at
+    ``/api/v1/servers/<id>/...`` with the same ``X-API-Key`` header and the
+    same error envelope, so the plumbing lives here once. What differs is the
+    set of endpoints, which the subclasses provide.
+
+    ``service`` and ``key_setting`` only shape error messages, but the
+    difference matters: "PowerDNS rejected the API key" pointing at
+    PDNS_API_KEY when the recursor is the one refusing sends an operator to
+    the wrong container.
+    """
+
+    service = "PowerDNS"
+    key_setting = "PDNS_API_KEY"
 
     def __init__(
         self,
@@ -154,14 +168,16 @@ class PdnsClient:
                 method, url, headers=headers, timeout=self.timeout, **kwargs
             )
         except requests.Timeout as exc:
-            raise PdnsError(f"PowerDNS API timed out after {self.timeout}s") from exc
+            raise PdnsError(f"The {self.service} API timed out after {self.timeout}s") from exc
         except requests.RequestException as exc:
-            raise PdnsError(f"Cannot reach the PowerDNS API at {self.base_url}: {exc}") from exc
+            raise PdnsError(
+                f"Cannot reach the {self.service} API at {self.base_url}: {exc}"
+            ) from exc
 
         if response.status_code == 401:
             raise PdnsError(
-                "PowerDNS rejected the API key. Check that PDNS_API_KEY matches on "
-                "both the pdns and webui containers.",
+                f"{self.service} rejected the API key. Check that {self.key_setting} "
+                "matches on both containers.",
                 401,
             )
         if response.status_code >= 400:
@@ -172,10 +188,9 @@ class PdnsClient:
         try:
             return response.json()
         except ValueError as exc:
-            raise PdnsError("PowerDNS returned a response that is not JSON") from exc
+            raise PdnsError(f"{self.service} returned a response that is not JSON") from exc
 
-    @staticmethod
-    def _error_message(response: requests.Response) -> str:
+    def _error_message(self, response: requests.Response) -> str:
         """PowerDNS puts a human-readable reason in an "error" field."""
         try:
             payload = response.json()
@@ -190,12 +205,27 @@ class PdnsClient:
         text = (response.text or "").strip()
         if text:
             return f"HTTP {response.status_code}: {text[:400]}"
-        return f"HTTP {response.status_code} from the PowerDNS API"
-
-    # -- server -----------------------------------------------------------
+        return f"HTTP {response.status_code} from the {self.service} API"
 
     def server_info(self) -> dict[str, Any]:
         return self._request("GET", f"/servers/{self.server_id}") or {}
+
+    def ping(self) -> bool:
+        """Whether the API answers and accepts our key."""
+        try:
+            self.server_info()
+            return True
+        except PdnsError:
+            return False
+
+
+class PdnsClient(ApiClient):
+    """Thin, synchronous wrapper around the PowerDNS Authoritative API."""
+
+    service = "PowerDNS"
+    key_setting = "PDNS_API_KEY"
+
+    # -- server -----------------------------------------------------------
 
     def statistics(self) -> dict[str, str]:
         """Flatten the statistics list into a name -> value mapping."""
@@ -205,14 +235,6 @@ class PdnsClient:
             if isinstance(entry, dict) and entry.get("type") == "StatisticItem":
                 stats[str(entry.get("name"))] = str(entry.get("value"))
         return stats
-
-    def ping(self) -> bool:
-        """Whether the API answers and accepts our key."""
-        try:
-            self.server_info()
-            return True
-        except PdnsError:
-            return False
 
     # -- zones ------------------------------------------------------------
 

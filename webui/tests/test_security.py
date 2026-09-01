@@ -217,6 +217,7 @@ class TestEveryRouteIsGuarded:
         "provider": "keycloak",
         "kind": "oauth",
         "zone_id": "example.com.",
+        "name": "corp.internal.",
         "filename": "css/app.css",
     }
 

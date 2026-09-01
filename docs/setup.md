@@ -94,6 +94,18 @@ dig @127.0.0.1 www.example.com A +short
 That round trip — panel → HTTP API → PostgreSQL → DNS answer — is the whole
 system working.
 
+## Forwarding, if you need it
+
+Out of the box the recursor answers for your zones and resolves everything else
+from the root servers. Two things are worth setting under **Forwarding**:
+
+- **Global forwarders** — your upstream resolvers, if you would rather not
+  resolve from the root yourself.
+- **Forward zones** — an internal domain or reverse zone that another server
+  owns, such as an Active Directory domain.
+
+Forwarders must be IP addresses. See [the guide](/guide#forwarding).
+
 ## Configuration you will want on day one
 
 Everything lives in `.env`, and `.env.example` documents every key. The values
@@ -143,6 +155,12 @@ dig @127.0.0.1 -p 5353 example.com SOA
 The container always serves on 53 internally; `DNS_PORT` only affects the host
 side. For a nameserver that the outside world will query, 53 is not optional —
 free it properly rather than remapping.
+
+`DNS_PORT` publishes the **recursor**, which is the front door: it answers for
+your zones and forwards everything else. The authoritative server sits behind
+it and is unpublished by default; `AUTH_DNS_PORT=5300` exposes it as well, which
+is useful when a zone answers wrongly and you want to know which half is at
+fault.
 
 To keep DNS on the loopback interface while you are still testing:
 

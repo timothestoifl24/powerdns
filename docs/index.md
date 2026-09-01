@@ -21,8 +21,8 @@ hero:
 
 features:
   - icon: 📦
-    title: Three services, one file
-    details: A PostgreSQL 17 database, PowerDNS Authoritative 4.9 and the Flask panel. Health-gated start-up order, secrets as files, no manual schema loading.
+    title: Four services, one file
+    details: A PostgreSQL 17 database, PowerDNS Authoritative 4.9, PowerDNS Recursor and the Flask panel. Health-gated start-up order, secrets as files, no manual schema loading.
     link: /setup
     linkText: Quick start
   - icon: 🔌
@@ -40,6 +40,11 @@ features:
     details: No application role is a superuser, and neither can read the other's tables — CI asserts it. The PowerDNS API port is never published to the host.
     link: /guide#the-security-model
     linkText: The security model
+  - icon: 🧭
+    title: Forwarding, from the same panel
+    details: Global forwarders and per-zone forward rules on a bundled PowerDNS Recursor. Your own zones stay answerable automatically, and the resolver is not open to the internet by default.
+    link: /guide#forwarding
+    linkText: Set up forwarding
   - icon: 🔏
     title: DNSSEC without the ceremony
     details: Enable signing on a zone and a combined signing key is created for you. The DS records to hand your registrar are shown ready to copy.

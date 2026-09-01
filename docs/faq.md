@@ -85,6 +85,18 @@ A connection error points at the compose network or at
 `PDNS_WEBSERVER_ALLOW_FROM` being narrower than the network the containers are
 on.
 
+### A zone resolves on the authoritative server but not through the recursor
+
+The recursor needs a forward rule pointing at the authoritative server for each
+zone this stack hosts. Open **Forwarding** — loading the page reconciles them —
+or press *Re-check local zone forwarding*. The zone should appear with a **local
+zone** badge.
+
+### Forward zones vanished after `docker compose down`
+
+They live in the `recursor-api` volume, which `down -v` deletes along with the
+database. Without `-v` they survive.
+
 ### A record I added is not being served
 
 Check in this order:
@@ -102,9 +114,36 @@ Check in this order:
 
 ### Is this a recursive resolver?
 
-No. It is authoritative only: it answers for the zones you create and refuses
-everything else. Pointing a client's resolver at it will not resolve the
-internet. Run Unbound, `dnsdist` or PowerDNS Recursor for that.
+Both, and deliberately. The stack runs two DNS servers: PowerDNS Authoritative
+holds the zones you create, and PowerDNS Recursor sits in front on port 53. The
+recursor answers for your zones by asking the authoritative server, and handles
+everything else according to the [Forwarding](/guide#forwarding) page — either
+forwarding to upstream resolvers you choose, or resolving from the root servers
+itself.
+
+They are separate because PowerDNS Authoritative genuinely cannot forward: the
+`recursor=` setting was removed in version 4.1.
+
+If you only want authoritative service, remove the `recursor` service from
+`compose.yml`, unset `RECURSOR_API_URL` and publish the authoritative server on
+`DNS_PORT`. The Forwarding page then says it is unavailable instead of failing.
+
+### Can I forward a domain to our Active Directory servers?
+
+Yes — that is what forward zones are for. Under **Forwarding**, add the domain
+with your domain controllers' IP addresses as forwarders, and leave *Ask the
+forwarder to recurse* off: they are authoritative for that zone. Add the reverse
+zone the same way, for example `10.in-addr.arpa`.
+
+Forwarders have to be IP addresses. A resolver reads them from its configuration
+before it is capable of resolving a name, so `dc1.corp.internal` cannot work
+there.
+
+### Why does a forward zone for `192.168.in-addr.arpa` say the zone exists?
+
+The recursor serves the RFC 1918 reverse zones itself, so it already knows that
+name. Saving from the Forwarding page replaces it, so it just works; you only
+see that error posting to the recursor's API by hand.
 
 ### Why does the panel go through the HTTP API instead of writing to the database?
 

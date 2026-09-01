@@ -452,6 +452,18 @@ def build_config() -> dict:
         "PDNS_API_KEY": env_secret("PDNS_API_KEY"),
         "PDNS_SERVER_ID": env_str("PDNS_SERVER_ID", "localhost"),
         "PDNS_API_TIMEOUT": env_int("PDNS_API_TIMEOUT", 10),
+        # PowerDNS Recursor HTTP API -- forward zones and global forwarders.
+        # Forwarding is off when either of the first two is empty, and the
+        # Forwarding page then explains what to set rather than erroring.
+        "RECURSOR_API_URL": env_str("RECURSOR_API_URL").rstrip("/"),
+        "RECURSOR_API_KEY": env_secret("RECURSOR_API_KEY"),
+        "RECURSOR_SERVER_ID": env_str("RECURSOR_SERVER_ID", "localhost"),
+        "RECURSOR_API_TIMEOUT": env_int("RECURSOR_API_TIMEOUT", 10),
+        # Where the recursor should send queries for the zones this stack is
+        # authoritative for. Forward targets are addresses, never names, so
+        # this is an IP even though the service is reachable as "pdns".
+        "PDNS_DNS_ADDRESS": env_str("PDNS_DNS_ADDRESS"),
+        "PDNS_DNS_PORT": env_int("PDNS_DNS_PORT", 53),
         # Zone defaults offered on the "new zone" form
         "DEFAULT_NAMESERVERS": env_list("DEFAULT_NAMESERVERS"),
         "DEFAULT_SOA_EDIT_API": env_str("DEFAULT_SOA_EDIT_API", "DEFAULT"),

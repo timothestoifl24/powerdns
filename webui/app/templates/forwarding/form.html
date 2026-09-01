@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% set editing = zone is not none %}
+{% block title %}{{ 'Edit forward zone' if editing else 'New forward zone' }} · {{ site_name }}{% endblock %}
+{% block header_pretitle %}Forwarding{% endblock %}
+{% block header_title %}{{ 'Edit forward zone' if editing else 'New forward zone' }}{% endblock %}
+
+{% block content %}
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <form method="post"
+            action="{{ url_for('forwarding.edit', name=zone.name) if editing else url_for('forwarding.create') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="card">
+          <div class="card-body">
+
+            <div class="mb-3">
+              <label class="form-label required" for="name">Zone</label>
+              <input type="text" id="name" name="name" class="form-control font-monospace"
+                     required autocomplete="off" placeholder="corp.internal"
+                     value="{{ zone.name if editing else form.get('name', '') }}"
+                     aria-describedby="name_help">
+              <small class="form-hint" id="name_help">
+                The zone and everything under it. <code>corp.internal</code> also
+                covers <code>host.corp.internal</code>. Reverse zones work the
+                same way: <code>10.in-addr.arpa</code> sends every 10.x lookup to
+                the servers below.
+              </small>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label required" for="servers">Forward to</label>
+              <textarea class="form-control font-monospace" id="servers" name="servers"
+                        rows="3" required placeholder="10.0.0.5&#10;10.0.0.6"
+                        aria-describedby="servers_help">{{ zone.servers | join('\n') if editing else form.get('servers', '') }}</textarea>
+              <small class="form-hint" id="servers_help">
+                One per line, or comma separated, tried in the order given. IP
+                addresses only — a resolver reads these before it can resolve a
+                name. Add <code>:port</code> for anything other than 53, and use
+                <code>[2001:db8::1]:5353</code> for IPv6 with a port.
+              </small>
+            </div>
+
+            <label class="form-check">
+              <input class="form-check-input" type="checkbox" name="recursion_desired"
+                     {{ 'checked' if (zone.recursion_desired if editing else form.get('recursion_desired')) }}>
+              <span class="form-check-label">Ask the forwarder to recurse</span>
+              <span class="form-check-description">
+                Leave off when forwarding to an authoritative server that holds
+                the zone, such as an internal Active Directory controller. Turn
+                it on when the target is itself a resolver — most public
+                resolvers refuse a query that does not set this bit.
+              </span>
+            </label>
+
+          </div>
+          <div class="card-footer d-flex">
+            <a href="{{ url_for('forwarding.index') }}" class="btn">Cancel</a>
+            <button type="submit" class="btn btn-primary ms-auto">
+              {{ 'Save changes' if editing else 'Create forward zone' }}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

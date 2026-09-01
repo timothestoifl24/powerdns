@@ -63,12 +63,12 @@ services:
       PDNS_VERSION_STRING: ${PDNS_VERSION_STRING:-anonymous}
       PDNS_LOGLEVEL: ${PDNS_LOGLEVEL:-4}
     ports:
-      # The DNS service itself. The API on 8081 is deliberately NOT published:
-      # only the webui container needs it, over the internal network.
-      # Many Linux hosts already run a resolver on 53 (systemd-resolved binds
-      # 127.0.0.53:53); set DNS_PORT to something else there.
-      - "${DNS_BIND_ADDRESS:-0.0.0.0}:${DNS_PORT:-53}:53/tcp"
-      - "${DNS_BIND_ADDRESS:-0.0.0.0}:${DNS_PORT:-53}:53/udp"
+      # The authoritative server is reached through the recursor, which is the
+      # front door on ${DNS_PORT}. Publishing it directly is optional and off
+      # by default: set AUTH_DNS_PORT to query it without going through the
+      # recursor, which is mainly useful for debugging a zone.
+      - "${AUTH_DNS_BIND_ADDRESS:-127.0.0.1}:${AUTH_DNS_PORT:-5300}:53/tcp"
+      - "${AUTH_DNS_BIND_ADDRESS:-127.0.0.1}:${AUTH_DNS_PORT:-5300}:53/udp"
     depends_on:
       db:
         condition: service_healthy
@@ -77,6 +77,50 @@ services:
       - pdns_api_key
     healthcheck:
       test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/53' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      backend:
+        # Forward targets in PowerDNS are IP addresses, never names, so the
+        # recursor cannot be pointed at "pdns". A fixed address keeps the
+        # forward rules for the local zones valid when this container is
+        # recreated and would otherwise get a new one from the pool.
+        ipv4_address: ${PDNS_STATIC_IP:-172.29.0.10}
+
+  recursor:
+    build:
+      context: ./recursor
+    image: ghcr.io/timothestoifl24/pdns-recursor:latest
+    container_name: pdns-recursor
+    restart: unless-stopped
+    environment:
+      RECURSOR_API_KEY_FILE: /run/secrets/recursor_api_key
+      # Private networks only by default. Anything wider makes this an open
+      # resolver, which will be found and used to amplify attacks on others.
+      RECURSOR_ALLOW_FROM: ${RECURSOR_ALLOW_FROM:-127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,::1/128,fc00::/7,fe80::/10}
+      RECURSOR_DNSSEC: ${RECURSOR_DNSSEC:-process}
+      RECURSOR_LOGLEVEL: ${RECURSOR_LOGLEVEL:-4}
+      RECURSOR_THREADS: ${RECURSOR_THREADS:-2}
+      RECURSOR_VERSION_STRING: ${RECURSOR_VERSION_STRING:-anonymous}
+    ports:
+      # The front door. Many Linux hosts already run a resolver on 53
+      # (systemd-resolved binds 127.0.0.53:53); set DNS_PORT elsewhere there.
+      - "${DNS_BIND_ADDRESS:-0.0.0.0}:${DNS_PORT:-53}:53/tcp"
+      - "${DNS_BIND_ADDRESS:-0.0.0.0}:${DNS_PORT:-53}:53/udp"
+    depends_on:
+      pdns:
+        condition: service_started
+    secrets:
+      - recursor_api_key
+    volumes:
+      # Zones created through the API are written here and read back at start.
+      # Without this volume every forward zone is lost when the container is
+      # replaced.
+      - recursor-api:/var/lib/powerdns-recursor/api
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/8082' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -100,6 +144,12 @@ services:
       DB_SCHEMA: ${WEBUI_DB_SCHEMA:-pdnsadmin}
       PDNS_API_URL: http://pdns:8081
       PDNS_API_KEY_FILE: /run/secrets/pdns_api_key
+      # Forwarding: the panel drives the recursor through its own API.
+      RECURSOR_API_URL: http://recursor:8082
+      RECURSOR_API_KEY_FILE: /run/secrets/recursor_api_key
+      # Where the recursor should send queries for the zones this stack is
+      # authoritative for. Must match the pdns service's address above.
+      PDNS_DNS_ADDRESS: ${PDNS_STATIC_IP:-172.29.0.10}
       SITE_NAME: ${SITE_NAME:-PowerDNS Admin}
       BASE_URL: ${BASE_URL:-}
       # Set to true once the panel is behind HTTPS; a secure cookie is not
@@ -123,11 +173,14 @@ services:
         condition: service_healthy
       pdns:
         condition: service_started
+      recursor:
+        condition: service_started
     secrets:
       - webui_secret_key
       - webui_db_password
       - webui_admin_password
       - pdns_api_key
+      - recursor_api_key
     healthcheck:
       test:
         - CMD-SHELL
@@ -142,9 +195,16 @@ services:
 networks:
   backend:
     driver: bridge
+    ipam:
+      config:
+        # Fixed so the authoritative server can have a fixed address; see the
+        # pdns service. Change BACKEND_SUBNET if it collides with a network
+        # this host already uses, and set PDNS_STATIC_IP inside it to match.
+        - subnet: ${BACKEND_SUBNET:-172.29.0.0/24}
 
 volumes:
   pgdata:
+  recursor-api:
 
 secrets:
   db_superuser_password:
@@ -159,3 +219,5 @@ secrets:
     file: ./secrets/webui_secret_key
   webui_admin_password:
     file: ./secrets/webui_admin_password
+  recursor_api_key:
+    file: ./secrets/recursor_api_key

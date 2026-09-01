@@ -272,6 +272,41 @@ def audit_log():
     return render_template("admin/audit.html", entries=audit.recent(limit), limit=limit)
 
 
+def _recursor_status(config) -> dict[str, object]:
+    """What the settings page says about forwarding.
+
+    Never raises: this page is where an operator looks when something is
+    wrong, so a broken recursor has to be reported here rather than replace
+    the page with a 500.
+    """
+    from ..recursor import client_from_config as recursor_client_from_config
+    from ..recursor import is_configured as recursor_is_configured
+    from ..recursor import local_zone_target
+
+    if not recursor_is_configured(config):
+        return {"configured": False}
+
+    status: dict[str, object] = {
+        "configured": True,
+        "url": config["RECURSOR_API_URL"],
+        "reachable": False,
+        "forward_zones": 0,
+        "local_target": "",
+        "error": None,
+    }
+    try:
+        status["local_target"] = local_zone_target(config)
+    except Exception as exc:  # noqa: BLE001 - reported, not raised
+        status["error"] = str(exc)
+    try:
+        zones = recursor_client_from_config(config).forward_zones()
+        status["reachable"] = True
+        status["forward_zones"] = len(zones)
+    except Exception as exc:  # noqa: BLE001 - reported, not raised
+        status["error"] = str(exc)
+    return status
+
+
 @bp.route("/settings")
 @admin_required
 def settings():
@@ -295,6 +330,7 @@ def settings():
         "admin/settings.html",
         auth=config["AUTH"],
         pdns_status=pdns_status,
+        recursor_status=_recursor_status(config),
         pdns_url=config["PDNS_API_URL"],
         base_url=config["BASE_URL"],
         default_nameservers=config["DEFAULT_NAMESERVERS"],

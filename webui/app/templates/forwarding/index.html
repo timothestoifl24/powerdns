@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Forwarding · {{ site_name }}{% endblock %}
+{% block header_pretitle %}PowerDNS Recursor{% endblock %}
+{% block header_title %}Forwarding{% endblock %}
+{% block header_actions %}
+  <a href="{{ url_for('forwarding.create') }}" class="btn btn-primary">
+    <i class="ti ti-plus me-2"></i>New forward zone
+  </a>
+{% endblock %}
+
+{% block content %}
+  {% if not reachable %}
+    <div class="alert alert-danger">
+      <h4 class="alert-title">The recursor is not answering</h4>
+      <p class="text-secondary mb-0">{{ error }}</p>
+      <p class="text-secondary mb-0 mt-2">
+        The panel is configured to reach it at
+        <code>{{ recursor_url }}</code>.
+      </p>
+    </div>
+  {% endif %}
+
+  {# ---- Global forwarders -------------------------------------------- #}
+  <div class="card mb-3">
+    <div class="card-header">
+      <div>
+        <h3 class="card-title">Global forwarders</h3>
+        <p class="card-subtitle">
+          Where to send anything this server is neither authoritative for nor
+          has a forward zone for. Leave empty to resolve from the root servers
+          directly.
+        </p>
+      </div>
+    </div>
+    <div class="card-body">
+      <form method="post" action="{{ url_for('forwarding.save_global') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label class="form-label" for="global_servers">Forwarder addresses</label>
+        <textarea class="form-control font-monospace" id="global_servers" name="servers"
+                  rows="3" placeholder="1.1.1.1&#10;9.9.9.9"
+                  aria-describedby="global_servers_help">{{ global_forwarders.servers | join('\n') if global_forwarders }}</textarea>
+        <small class="form-hint" id="global_servers_help">
+          One per line, or comma separated. IP addresses only — a resolver reads
+          these before it can resolve a name. Add <code>:port</code> for
+          anything other than 53, and use <code>[2001:db8::1]:5353</code> for
+          IPv6 with a port. They are tried in the order given.
+        </small>
+        <div class="mt-3">
+          <button type="submit" class="btn btn-primary">Save global forwarders</button>
+          {% if global_forwarders %}
+            <span class="text-secondary ms-3">
+              <i class="ti ti-arrow-right me-1"></i>currently
+              <span class="font-monospace">{{ global_forwarders.servers_text }}</span>
+            </span>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {# ---- Forward zones ------------------------------------------------ #}
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h3 class="card-title">Forward zones</h3>
+        <p class="card-subtitle">
+          Queries for these names go to the servers listed instead of being
+          resolved from the public internet.
+        </p>
+      </div>
+    </div>
+
+    {% if zones %}
+      <div class="table-responsive">
+        <table class="table card-table table-vcenter">
+          <thead>
+            <tr>
+              <th>Zone</th>
+              <th>Forwards to</th>
+              <th>Recursion</th>
+              <th class="w-1"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for zone in zones %}
+              {% set is_local = local_target and zone.servers | length == 1
+                                and zone.servers[0] == local_target %}
+              <tr>
+                <td class="fw-medium">
+                  {{ zone.name }}
+                  {% if is_local %}
+                    <span class="badge bg-blue-lt ms-2" title="Kept in step with the zones this server hosts">
+                      local zone
+                    </span>
+                  {% endif %}
+                </td>
+                <td class="font-monospace text-secondary">{{ zone.servers_text }}</td>
+                <td>
+                  {% if zone.recursion_desired %}
+                    <span class="badge bg-secondary-lt" title="The query asks the forwarder to recurse">
+                      desired
+                    </span>
+                  {% else %}
+                    <span class="text-secondary">—</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if not is_local %}
+                    <div class="btn-list flex-nowrap justify-content-end">
+                      <a href="{{ url_for('forwarding.edit', name=zone.name) }}" class="btn btn-sm">
+                        Edit
+                      </a>
+                      <form method="post" action="{{ url_for('forwarding.delete', name=zone.name) }}"
+                            onsubmit="return confirm('Stop forwarding {{ zone.name }}?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm btn-ghost-danger">Remove</button>
+                      </form>
+                    </div>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="card-body">
+        <div class="empty">
+          <div class="empty-icon"><i class="ti ti-route-off"></i></div>
+          <p class="empty-title">No forward zones</p>
+          <p class="empty-subtitle text-secondary">
+            Add one to send a namespace — an internal domain, or a reverse zone
+            — to a specific server.
+          </p>
+          <div class="empty-action">
+            <a href="{{ url_for('forwarding.create') }}" class="btn btn-primary">
+              <i class="ti ti-plus me-2"></i>New forward zone
+            </a>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+
+  {# ---- How the two servers fit together ------------------------------ #}
+  <div class="card mt-3">
+    <div class="card-header"><h3 class="card-title">How queries are answered</h3></div>
+    <div class="card-body">
+      <ol class="mb-3 text-secondary">
+        <li>A zone this server is authoritative for is answered from its own
+            data, by forwarding to the authoritative server
+            {% if local_target %}
+              at <span class="font-monospace">{{ local_target }}</span>
+            {% endif %}.
+            Those rules are marked <span class="badge bg-blue-lt">local zone</span>
+            above and are kept in step automatically — creating or deleting a
+            zone updates them.</li>
+        <li>Otherwise the most specific matching forward zone above wins.</li>
+        <li>Otherwise the global forwarders.</li>
+        <li>With no global forwarders, the resolver walks down from the root
+            servers itself.</li>
+      </ol>
+      <form method="post" action="{{ url_for('forwarding.sync') }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-sm">
+          <i class="ti ti-refresh me-2"></i>Re-check local zone forwarding
+        </button>
+      </form>
+      {% if synced %}
+        <span class="text-secondary ms-3">{{ synced }}</span>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

@@ -92,12 +92,14 @@ def register_blueprints(app: Flask) -> None:
     from .views.auth_views import bp as auth_bp
     from .views.authproviders import bp as authproviders_bp
     from .views.dashboard import bp as dashboard_bp
+    from .views.forwarding import bp as forwarding_bp
     from .views.profile import bp as profile_bp
     from .views.zones import bp as zones_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(zones_bp)
+    app.register_blueprint(forwarding_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(authproviders_bp)
     app.register_blueprint(profile_bp)
@@ -140,6 +142,9 @@ def register_hooks(app: Flask) -> None:
         """Readiness: reports whether the database and PowerDNS API answer."""
         from sqlalchemy import text
 
+        from .recursor import client_from_config as recursor_client
+        from .recursor import is_configured as recursor_configured
+
         checks = {"database": False, "powerdns": False}
         try:
             database.get_session().execute(text("SELECT 1"))
@@ -151,7 +156,17 @@ def register_hooks(app: Flask) -> None:
         except Exception:
             current_app.logger.exception("readiness: PowerDNS check failed")
 
-        healthy = all(checks.values())
+        # Reported only when one is configured, and never counted towards
+        # readiness: forwarding being unavailable is a degraded feature, not a
+        # reason to take the panel out of a load balancer.
+        if recursor_configured(current_app.config):
+            try:
+                checks["recursor"] = recursor_client(current_app.config).ping()
+            except Exception:
+                current_app.logger.exception("readiness: recursor check failed")
+                checks["recursor"] = False
+
+        healthy = checks["database"] and checks["powerdns"]
         return ({"status": "ok" if healthy else "degraded", **checks}, 200 if healthy else 503)
 
 
@@ -206,6 +221,7 @@ def _template_auth_config():
 
 def register_template_helpers(app: Flask) -> None:
     from .pdns import PdnsError
+    from .recursor import is_configured as recursor_is_configured
 
     @app.context_processor
     def _globals() -> dict:
@@ -217,6 +233,7 @@ def register_template_helpers(app: Flask) -> None:
             "auth_config": _template_auth_config(),
             "record_types": COMMON_RECORD_TYPES,
             "zone_kinds": ZONE_KINDS,
+            "forwarding_enabled": recursor_is_configured(app.config),
         }
 
     @app.template_filter("relname")

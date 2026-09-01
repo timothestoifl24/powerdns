@@ -311,36 +311,17 @@ jobs:
           print("recursor resolves to:", socket.gethostbyname("recursor"))
           PY
 
-          # Every attempt asks the same question twice: once from the host
-          # through the published port, and once from inside the compose
-          # network. Earlier runs showed the two disagreeing -- the in-network
-          # query forwarded correctly while the published-port query was
-          # resolved from the root -- and printing both on the same tick is
-          # what separates "the rule takes time to apply" from "it depends on
-          # where the query came from".
-          probe_inside() {
-            docker compose exec -T webui python -c "
-          import socket
-          s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(4)
-          q = (b'\xab\xcd\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00'
-               b'\x03www\x05smoke\x04test\x00\x00\x01\x00\x01')
-          try:
-              s.sendto(q, ('recursor', 53))
-              data, _ = s.recvfrom(512)
-              print('rcode', data[3] & 0x0F, 'answers', data[7])
-          except Exception as exc:
-              print('no reply --', type(exc).__name__)
-          " 2>/dev/null || echo "probe failed"
-          }
-
+          # dig sets the DNSSEC OK bit by default, so this is also the
+          # regression test for validating a forwarded zone: a resolver that
+          # tried would ask the root whether smoke.test is signed, be told it
+          # does not exist there, and SERVFAIL a correct answer.
           sleep 5
           for attempt in $(seq 1 10); do
             answer=$(dig +short @127.0.0.1 -p 5353 www.smoke.test A || true)
             [ "$answer" = "192.0.2.42" ] && break
             status=$(dig @127.0.0.1 -p 5353 www.smoke.test A +time=3 +tries=1 \
                      | grep -oP 'status: \K[A-Z]+' | head -1 || true)
-            printf 'attempt %2d  from host: %-10s (%s)   from inside: %s\n' \
-              "$attempt" "${answer:-<empty>}" "${status:-no reply}" "$(probe_inside)"
+            echo "attempt $attempt: got '${answer:-<empty>}' (${status:-no reply})"
             docker compose exec -T recursor rec_control wipe-cache 'smoke.test$' \
               >/dev/null 2>&1 || true
             sleep 5
@@ -430,6 +411,19 @@ jobs:
           fi
           # And it is listed on the page.
           curl -fsS -b /tmp/panel.jar http://localhost:9191/forwarding/ | grep -q "fwd.test."
+
+          # Explicitly with and without the DNSSEC OK bit. A forwarded zone is
+          # answered from outside the public chain, so a resolver that
+          # validated it would SERVFAIL the +dnssec form while the plain one
+          # worked -- which is what shipped before this was pinned.
+          for flag in +dnssec +nodnssec; do
+            got=$(dig +short "$flag" @127.0.0.1 -p 5353 host.fwd.test A || true)
+            echo "  dig $flag -> ${got:-<empty>}"
+            [ "$got" = "192.0.2.77" ] || {
+              echo "::error::a forwarded zone does not answer with $flag"
+              exit 1
+            }
+          done
 
       - name: Global forwarders take effect
         run: |

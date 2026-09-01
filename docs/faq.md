@@ -85,6 +85,15 @@ A connection error points at the compose network or at
 `PDNS_WEBSERVER_ALLOW_FROM` being narrower than the network the containers are
 on.
 
+### A forwarded zone returns SERVFAIL to `dig` but works otherwise
+
+That is DNSSEC. `dig` sets the DNSSEC OK bit by default; a resolver that
+validates asks the root whether the forwarded name is signed, is told it does
+not exist there, and SERVFAILs a correct answer. The stack ships with
+validation off for this reason — see
+[DNSSEC and forwarding](/guide#dnssec-and-forwarding). If you turned it on,
+add the zone to `RECURSOR_NEGATIVE_TRUSTANCHORS`.
+
 ### I added a forward zone and it still returns the old answer
 
 It should not: saving a forward zone flushes everything the resolver had

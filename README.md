@@ -327,6 +327,35 @@ A rule you created yourself is never touched by that reconciliation, even if it
 covers a zone of the same name. Only rules pointing at the authoritative server
 are treated as the panel's.
 
+### DNSSEC and forwarding
+
+`RECURSOR_DNSSEC` defaults to `process-no-validate`, which is a deliberate
+choice rather than a shortcut.
+
+A zone you forward is answered by a server outside the public DNS chain, so it
+cannot be validated against that chain: the resolver asks the root whether the
+name is signed, is told it does not exist there, and returns SERVFAIL for an
+answer that is perfectly correct. This is not an edge case — every deployment
+forwards at least one such zone, because each zone this stack is authoritative
+for is forwarded to the authoritative server. Validating here would mean
+SERVFAIL for **your own zones** to any client that sets the DNSSEC OK bit,
+which today is most of them, `dig` included.
+
+DNSSEC records are still served to clients that ask for them, so a validating
+resolver downstream can check for itself.
+
+To validate here instead, turn it on and name every internal zone as a
+negative trust anchor — every forward zone, and every zone this server is
+authoritative for:
+
+```bash
+RECURSOR_DNSSEC=process
+RECURSOR_NEGATIVE_TRUSTANCHORS=corp.internal,10.in-addr.arpa,example.com
+```
+
+Miss one and it returns SERVFAIL, so this is worth doing only if you need
+validation of public names at this resolver rather than at the client.
+
 ### Not an open resolver
 
 `RECURSOR_ALLOW_FROM` defaults to private networks and loopback only. A

@@ -16,8 +16,25 @@ incoming:
   allow_from: __ALLOW_FROM__
 
 dnssec:
-  # process (validate when asked), validate (always), log-fail, off.
+  # off / process-no-validate / process / log-fail / validate.
+  #
+  # process-no-validate by default, and that is a deliberate choice rather
+  # than a shortcut. A forwarded zone's data does not come from the public
+  # DNS chain, so it cannot be validated against it: the resolver asks the
+  # root whether the name is signed, is told it does not exist there, and
+  # returns SERVFAIL for an answer that is perfectly correct. Every deployment
+  # forwards at least one such zone -- the panel forwards each zone this stack
+  # is authoritative for to the authoritative server -- so validating here
+  # would mean SERVFAIL for your own zones to any client that sets the DNSSEC
+  # OK bit, which today is most of them.
+  #
+  # DNSSEC records are still served to clients that ask for them, so a
+  # validating client downstream can still do its own checking. To validate
+  # here instead, set RECURSOR_DNSSEC=process and list every internal zone in
+  # RECURSOR_NEGATIVE_TRUSTANCHORS.
   validation: __DNSSEC__
+  # Names not to validate at or below. See above.
+  negative_trustanchors: __NEGATIVE_TRUSTANCHORS__
 
 webservice:
   # The admin panel manages forward zones exclusively through this API. Keep

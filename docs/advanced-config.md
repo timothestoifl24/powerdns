@@ -266,7 +266,9 @@ services:
   recursor:
     environment:
       RECURSOR_ALLOW_FROM: 10.0.0.0/8,192.168.0.0/16
-      RECURSOR_DNSSEC: validate
+      # Validation is off by default on purpose; see the guide.
+      RECURSOR_DNSSEC: process
+      RECURSOR_NEGATIVE_TRUSTANCHORS: corp.internal,10.in-addr.arpa
       RECURSOR_THREADS: "4"
       RECURSOR_EXTRA_YAML: |
         recordcache:
@@ -292,7 +294,8 @@ underscores: `allow-from` is `incoming.allow_from`, `api-config-dir` is
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `RECURSOR_ALLOW_FROM` | private networks + loopback | Who may use the resolver. **Never `0.0.0.0/0`** — see below. |
-| `RECURSOR_DNSSEC` | `process` | `process`, `validate` or `off`. |
+| `RECURSOR_DNSSEC` | `process-no-validate` | Validation is off on purpose; see [DNSSEC and forwarding](/guide#dnssec-and-forwarding). |
+| `RECURSOR_NEGATIVE_TRUSTANCHORS` | — | Zones not to validate, needed if you set `process`. |
 | `RECURSOR_THREADS` | `2` | |
 | `RECURSOR_LOGLEVEL` | `4` | |
 | `RECURSOR_VERSION_STRING` | `anonymous` | What a `version.bind` query returns. |

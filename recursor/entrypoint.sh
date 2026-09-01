@@ -39,7 +39,8 @@ resolve_secret RECURSOR_API_KEY
 # Private networks only. See the comment in the template: widening this to
 # 0.0.0.0/0 turns the container into an open resolver.
 : "${RECURSOR_ALLOW_FROM:=127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,::1/128,fc00::/7,fe80::/10}"
-: "${RECURSOR_DNSSEC:=process}"
+: "${RECURSOR_DNSSEC:=process-no-validate}"
+: "${RECURSOR_NEGATIVE_TRUSTANCHORS:=}"
 : "${RECURSOR_WEBSERVER_ADDRESS:=0.0.0.0}"
 : "${RECURSOR_WEBSERVER_PORT:=8082}"
 # Compose user-defined networks live in 172.16/12 by default. Narrow or widen
@@ -84,6 +85,22 @@ yaml_list() {
   printf '[%s]' "$out"
 }
 
+# A YAML sequence of negative trust anchors, from a comma-separated list of
+# zone names. These are what let DNSSEC validation stay on while still
+# resolving internal zones, whose data never comes from the public chain.
+yaml_negative_trustanchors() {
+  local raw="$1" item out=""
+  local IFS=,
+  for item in $raw; do
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
+    [ -n "$item" ] || continue
+    [ -z "$out" ] || out+=", "
+    out+="{name: $(yaml_string "$item"), reason: 'forwarded to a local server'}"
+  done
+  printf '[%s]' "$out"
+}
+
 render_config() {
   local text key value value_var
   text="$(< "$TEMPLATE")"
@@ -97,6 +114,7 @@ render_config() {
     [WEBSERVER_ALLOW_FROM]="$(yaml_list "$RECURSOR_WEBSERVER_ALLOW_FROM")"
     [API_KEY]="$(yaml_string "$RECURSOR_API_KEY")"
     [DNSSEC]="$(yaml_string "$RECURSOR_DNSSEC")"
+    [NEGATIVE_TRUSTANCHORS]="$(yaml_negative_trustanchors "$RECURSOR_NEGATIVE_TRUSTANCHORS")"
     [WEBSERVER_ADDRESS]="$(yaml_string "$RECURSOR_WEBSERVER_ADDRESS")"
     [VERSION_STRING]="$(yaml_string "$RECURSOR_VERSION_STRING")"
     [API_DIR]="$(yaml_string "$RECURSOR_API_DIR")"

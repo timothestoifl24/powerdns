@@ -100,7 +100,12 @@ services:
       # Private networks only by default. Anything wider makes this an open
       # resolver, which will be found and used to amplify attacks on others.
       RECURSOR_ALLOW_FROM: ${RECURSOR_ALLOW_FROM:-127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,::1/128,fc00::/7,fe80::/10}
-      RECURSOR_DNSSEC: ${RECURSOR_DNSSEC:-process}
+      # process-no-validate, not process: a forwarded zone's data does not
+      # come from the public DNS chain and so cannot be validated against it.
+      # Every deployment forwards at least one such zone, so validating here
+      # would SERVFAIL your own zones. See README, "DNSSEC and forwarding".
+      RECURSOR_DNSSEC: ${RECURSOR_DNSSEC:-process-no-validate}
+      RECURSOR_NEGATIVE_TRUSTANCHORS: ${RECURSOR_NEGATIVE_TRUSTANCHORS:-}
       RECURSOR_LOGLEVEL: ${RECURSOR_LOGLEVEL:-4}
       RECURSOR_THREADS: ${RECURSOR_THREADS:-2}
       RECURSOR_VERSION_STRING: ${RECURSOR_VERSION_STRING:-anonymous}

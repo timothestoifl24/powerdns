@@ -223,6 +223,26 @@ dig @127.0.0.1 www.example.com            # through the recursor, as clients see
 An answer from the first and not the second means the forward rule is missing —
 open Forwarding, which reconciles them.
 
+### DNSSEC and forwarding
+
+The resolver ships with validation off (`process-no-validate`), and that is
+deliberate.
+
+A forwarded zone is answered by a server outside the public DNS chain, so it
+cannot be validated against that chain. A validating resolver asks the root
+whether `corp.internal` is signed, is told the name does not exist there, and
+returns SERVFAIL — for an answer that is perfectly correct. It applies to your
+own zones too, since each one is forwarded to the authoritative server, so
+validating would break exactly the names this server exists to answer. `dig`
+sets the DNSSEC OK bit by default, so you would see it immediately.
+
+DNSSEC records are still passed to clients that ask for them, so a validating
+resolver downstream can still check for itself.
+
+If you want validation here, set `RECURSOR_DNSSEC=process` and list every
+internal zone — forward zones and your own authoritative zones — in
+`RECURSOR_NEGATIVE_TRUSTANCHORS`. Anything you miss returns SERVFAIL.
+
 ### Not an open resolver
 
 `RECURSOR_ALLOW_FROM` defaults to private networks and loopback. A recursor

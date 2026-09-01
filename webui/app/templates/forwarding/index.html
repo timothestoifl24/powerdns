@@ -160,6 +160,12 @@
         <li>With no global forwarders, the resolver walks down from the root
             servers itself.</li>
       </ol>
+      <p class="text-secondary">
+        A forwarded zone is answered from outside the public DNS chain, so it
+        cannot be DNSSEC-validated against it. This resolver therefore serves
+        DNSSEC records but does not validate; a validating client downstream
+        still can.
+      </p>
       <form method="post" action="{{ url_for('forwarding.sync') }}" class="d-inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-sm">

@@ -311,19 +311,16 @@ jobs:
           print("recursor resolves to:", socket.gethostbyname("recursor"))
           PY
 
-          # dig sets the DNSSEC OK bit by default, so this is also the
+          # dig sets the DNSSEC OK bit by default, so this doubles as the
           # regression test for validating a forwarded zone: a resolver that
           # tried would ask the root whether smoke.test is signed, be told it
           # does not exist there, and SERVFAIL a correct answer.
-          sleep 5
           for attempt in $(seq 1 10); do
             answer=$(dig +short @127.0.0.1 -p 5353 www.smoke.test A || true)
             [ "$answer" = "192.0.2.42" ] && break
             status=$(dig @127.0.0.1 -p 5353 www.smoke.test A +time=3 +tries=1 \
                      | grep -oP 'status: \K[A-Z]+' | head -1 || true)
             echo "attempt $attempt: got '${answer:-<empty>}' (${status:-no reply})"
-            docker compose exec -T recursor rec_control wipe-cache 'smoke.test$' \
-              >/dev/null 2>&1 || true
             sleep 5
           done
           echo "dig via the recursor returned: ${answer:-<empty>}"
@@ -390,16 +387,10 @@ jobs:
             --data-urlencode "servers=${PDNS_STATIC_IP:-172.29.0.10}" \
             --data-urlencode "csrf_token=$(cat /tmp/panel.csrf)"
 
-          # Same settle-and-flush as above: the reloaded zone map reaches the
-          # worker threads asynchronously, and a query that lands before it
-          # does is answered the old way and cached for a minute.
-          sleep 5
           for attempt in $(seq 1 12); do
             answer=$(dig +short @127.0.0.1 -p 5353 host.fwd.test A || true)
             [ "$answer" = "192.0.2.77" ] && break
             echo "attempt $attempt: got '${answer:-<empty>}', retrying"
-            docker compose exec -T recursor rec_control wipe-cache 'fwd.test$' \
-              >/dev/null 2>&1 || true
             sleep 5
           done
           echo "forward zone resolved to: ${answer:-<empty>}"
@@ -474,13 +465,10 @@ jobs:
             --data-urlencode "servers=${PDNS_STATIC_IP:-172.29.0.10}" \
             --data-urlencode "csrf_token=$(cat /tmp/panel.csrf)"
 
-          sleep 5
           for attempt in $(seq 1 12); do
             answer=$(dig +short @127.0.0.1 -p 5353 host.global.test A || true)
             [ "$answer" = "192.0.2.88" ] && break
             echo "attempt $attempt: got '${answer:-<empty>}', retrying"
-            docker compose exec -T recursor rec_control wipe-cache 'global.test$' \
-              >/dev/null 2>&1 || true
             sleep 5
           done
           echo "after global forwarders: ${answer:-<empty>}"
@@ -538,8 +526,6 @@ jobs:
             answer=$(dig +short @127.0.0.1 -p 5353 host.fwd.test A || true)
             [ "$answer" = "192.0.2.77" ] && break
             echo "attempt $attempt: got '${answer:-<empty>}', retrying"
-            docker compose exec -T recursor rec_control wipe-cache 'fwd.test$' \
-              >/dev/null 2>&1 || true
             sleep 5
           done
           echo "after restart: ${answer:-<empty>}"

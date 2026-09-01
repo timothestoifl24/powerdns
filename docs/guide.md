@@ -203,12 +203,15 @@ changing where *everything* goes invalidates everything.
 If the flush itself fails, the change still stands: the forwarding is correct
 and only the rollout is slow. The panel logs a warning saying so.
 
-The resolver hands a changed zone map to its worker threads asynchronously, so
-a query made in the same instant as the change can still be answered the old
-way — and, being an answer, cached. It settles within a second or two. If you
-are testing a rule the moment you save it and see the old answer, query again
-rather than concluding the rule is wrong; `rec_control wipe-cache 'zone$'`
-inside the recursor container clears it immediately.
+If you changed the forwarding another way — through the recursor's API
+directly, or by editing its configuration — nothing flushed the cache for you.
+Clear it by hand:
+
+```bash
+docker compose exec recursor rec_control wipe-cache 'corp.internal$'
+```
+
+The `$` makes it wipe the subtree rather than the exact name only.
 
 ### Which half answered?
 

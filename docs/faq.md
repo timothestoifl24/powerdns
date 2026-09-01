@@ -85,6 +85,19 @@ A connection error points at the compose network or at
 `PDNS_WEBSERVER_ALLOW_FROM` being narrower than the network the containers are
 on.
 
+### I added a forward zone and it still returns the old answer
+
+It should not: saving a forward zone flushes everything the resolver had
+cached under that name. If you changed the forwarding another way — through
+the recursor's API directly, or by editing its configuration — flush it
+yourself:
+
+```bash
+docker compose exec recursor rec_control wipe-cache corp.internal$
+```
+
+The `$` makes it match the subtree rather than only the exact name.
+
 ### A zone resolves on the authoritative server but not through the recursor
 
 The recursor needs a forward rule pointing at the authoritative server for each

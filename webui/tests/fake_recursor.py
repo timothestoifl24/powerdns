@@ -49,7 +49,11 @@ class FakeRecursor:
         #: id -> zone document, mirroring how the recursor keys its own files.
         self.zones: dict[str, dict[str, Any]] = {}
         self.requests: list[tuple[str, str]] = []
+        #: (domain, subtree) for every cache flush, so tests can assert that a
+        #: forwarding change invalidated what was cached for that name.
+        self.flushed: list[tuple[str, str]] = []
         self.unreachable = False
+        self.flush_fails = False
         for name in BUILT_IN_REVERSE_ZONES:
             self.zones[zone_id(name)] = {
                 "id": zone_id(name),
@@ -108,6 +112,12 @@ class FakeRecursor:
             return FakeResponse(401, {"error": "Unauthorized"})
 
         prefix = "/api/v1/servers/localhost"
+        if path == f"{prefix}/cache/flush":
+            if self.flush_fails:
+                return FakeResponse(500, {"error": "cache is busy"})
+            params = kwargs.get("params") or {}
+            self.flushed.append((params.get("domain", ""), params.get("subtree", "")))
+            return FakeResponse(200, {"count": 3, "result": "Flushed cache."})
         if path == prefix:
             return FakeResponse(
                 200, {"type": "Server", "id": "localhost", "daemon_type": "recursor"}

@@ -164,6 +164,49 @@ class TestRecursorClient:
             client.forward_zones()
 
 
+class TestCacheIsFlushedOnChange:
+    """A resolver does not re-evaluate what it already has cached, and that
+    cache includes failures. Without a flush, adding a forward zone and
+    immediately querying it returns the answer from before the change -- which
+    is indistinguishable from the forward zone not working."""
+
+    def test_saving_flushes_the_zone(self, recursor):
+        client_for(recursor).save_forward_zone("corp.internal", ["10.0.0.5:53"])
+        assert recursor.flushed == [("corp.internal.", "true")]
+
+    def test_deleting_flushes_the_zone(self, recursor):
+        recursor.add_forward_zone("corp.internal", ["10.0.0.5:53"])
+        client = client_for(recursor)
+        recursor.flushed.clear()
+        client.delete_forward_zone("corp.internal")
+        assert recursor.flushed == [("corp.internal.", "true")]
+
+    def test_global_forwarders_flush_the_whole_tree(self, recursor):
+        """Changing where everything goes invalidates everything."""
+        client_for(recursor).save_forward_zone(".", ["1.1.1.1:53"], recursion_desired=True)
+        assert recursor.flushed == [(".", "true")]
+
+    def test_a_failed_flush_does_not_fail_the_save(self, recursor):
+        """The forwarding change is already made and correct; a resolver that
+        will not drop its cache is a slow rollout, not a failed save."""
+        recursor.flush_fails = True
+        client_for(recursor).save_forward_zone("corp.internal", ["10.0.0.5:53"])
+        assert recursor.forwarded["corp.internal."] == ["10.0.0.5:53"]
+
+    def test_the_sync_flushes_each_zone_it_changes(self, recursor):
+        client = client_for(recursor)
+        sync_local_zones(["example.com"], client, LOCAL_TARGET)
+        assert ("example.com.", "true") in recursor.flushed
+
+    def test_an_unchanged_sync_flushes_nothing(self, recursor):
+        """Flushing on every page load would throw away a warm cache."""
+        client = client_for(recursor)
+        sync_local_zones(["example.com"], client, LOCAL_TARGET)
+        recursor.flushed.clear()
+        sync_local_zones(["example.com"], client, LOCAL_TARGET)
+        assert recursor.flushed == []
+
+
 class TestLocalZoneSync:
     """The recursor is the front door, so a zone this stack hosts is answered
     from the public internet unless a rule sends it to the authoritative

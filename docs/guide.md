@@ -191,6 +191,18 @@ A rule you made yourself is never touched by that reconciliation, even when it
 covers a zone of the same name: only rules pointing at the authoritative server
 count as the panel's.
 
+### Changes take effect immediately
+
+A resolver does not re-evaluate what it already has cached, and that cache
+includes failures. Saving a forward zone therefore also flushes everything
+cached under that name — otherwise a query made moments before the change
+would keep being answered from the old data, or from a cached `SERVFAIL`, for
+as long as the entry lives. Global forwarders flush the whole tree, because
+changing where *everything* goes invalidates everything.
+
+If the flush itself fails, the change still stands: the forwarding is correct
+and only the rollout is slow. The panel logs a warning saying so.
+
 ### Which half answered?
 
 When a name resolves wrongly, ask each server separately. Publish the

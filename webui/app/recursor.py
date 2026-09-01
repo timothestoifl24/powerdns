@@ -198,6 +198,41 @@ class RecursorClient(ApiClient):
                 return str(zone["id"])
         return zone_id_for(name)
 
+    def flush_cache(self, name: str, subtree: bool = True) -> int:
+        """Drop everything cached under ``name``. Returns how many entries went.
+
+        Changing where a name is answered from does not touch what the resolver
+        already has for it, and that cache includes failures. Adding a forward
+        zone and immediately querying it otherwise returns the *old* answer --
+        or a cached SERVFAIL from the moment before the zone existed -- for up
+        to the cache TTL, which looks exactly like the forward zone not
+        working.
+        """
+        payload = self._request(
+            "PUT",
+            f"/servers/{self.server_id}/cache/flush",
+            params={"domain": canonical(name), "subtree": "true" if subtree else "false"},
+        )
+        return int((payload or {}).get("count", 0))
+
+    def _flush_quietly(self, name: str) -> None:
+        """Flush, but never fail the change that prompted it.
+
+        The forwarding change has already been made and is correct; a resolver
+        that will not drop its cache is a slow rollout, not a reason to report
+        the save as failed.
+        """
+        try:
+            count = self.flush_cache(name)
+            log.info("flushed %d cache entries under %s", count, canonical(name))
+        except PdnsError as exc:
+            log.warning(
+                "could not flush the recursor cache for %s: %s. Answers cached "
+                "before this change will stand until they expire.",
+                canonical(name),
+                exc,
+            )
+
     def save_forward_zone(
         self, name: str, servers: list[str], recursion_desired: bool = False
     ) -> None:
@@ -223,9 +258,11 @@ class RecursorClient(ApiClient):
             if "already exists" not in str(exc).lower():
                 raise
             self._request("PUT", self._zone_path(self.resolve_zone_id(name)), json=body)
+        self._flush_quietly(name)
 
     def delete_forward_zone(self, name: str) -> None:
         self._request("DELETE", self._zone_path(self.resolve_zone_id(name)))
+        self._flush_quietly(name)
 
     def _zone_path(self, zone_id: str) -> str:
         return f"/servers/{self.server_id}/zones/{quote(zone_id, safe='')}"

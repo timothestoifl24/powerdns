@@ -39,6 +39,13 @@ jobs:
   verify:
     name: Verify the tag
     runs-on: ubuntu-latest
+    # A job-level block replaces the workflow-level one outright, so
+    # `contents: read` has to be repeated here. `checks: read` is what lets the
+    # step below read the CI conclusions back; without it the API answers 403
+    # and the job fails for a reason that has nothing to do with the release.
+    permissions:
+      contents: read
+      checks: read
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
       version: ${{ steps.tag.outputs.version }}

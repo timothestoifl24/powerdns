@@ -43,7 +43,7 @@ sign-in provider secrets stored in `auth_providers`.
 down -v` deletes the `pgdata` volume, and with it every zone. Dump first.
 :::
 
-## Upgrading to the release that adds forwarding
+## Upgrading to v1.0.1
 
 This one changes which server answers on port 53, so read it before pulling.
 
@@ -116,16 +116,29 @@ You want `database schema is up to date` followed by gunicorn booting its
 workers. Sessions do not survive the restart if `SECRET_KEY` changed; with the
 same secret file, they do.
 
-If you prefer published images to building locally, the CI pipeline pushes
-`ghcr.io/timothestoifl24/pdns-webui`, `…/pdns`, `…/pdns-recursor` and
-`…/pdns-db` on every merge to `main`, tagged `latest` and by commit SHA. Pin the SHA in production and move it
-deliberately:
+If you prefer published images to building locally, four are pushed to
+`ghcr.io`: `pdns-webui`, `pdns`, `pdns-recursor` and `pdns-db`. Every merge to
+`main` publishes `latest` and a commit SHA tag; every release additionally
+publishes the version, so `1.0.1` and `1.0` name a build whose contents will
+never change.
+
+Pin a version in production and move it deliberately:
 
 ```yaml
 services:
   webui:
-    image: ghcr.io/timothestoifl24/pdns-webui:sha-1a2b3c4
+    image: ghcr.io/timothestoifl24/pdns-webui:1.0.1
 ```
+
+`1.0` follows the patch releases in that series, and `sha-1a2b3c4` pins one
+exact build if you need to. `latest` is fine for a lab and a poor idea in
+production, where an unattended `docker compose pull` should never be able to
+change what you are running.
+
+What changed between two versions is in the
+[changelog](https://github.com/timothestoifl24/powerdns/blob/main/CHANGELOG.md),
+and each [release](https://github.com/timothestoifl24/powerdns/releases) repeats
+it with the full list of merged pull requests.
 
 ## Upgrading PowerDNS
 

@@ -119,6 +119,9 @@ The rules, which are worth reading once:
   restrict the panel to one directory group.
 - If no group mapping is configured at all, everyone who authenticates gets
   `*_DEFAULT_ROLE`, which itself defaults to `user`.
+- Setting an external user's role by hand **pins** it, and the mapping stops
+  overwriting it on later sign-ins. Admission is still the mapping's decision:
+  see [pinning a role by hand](/guide#pinning-a-role-by-hand).
 
 ### LDAP / Active Directory
 
@@ -147,6 +150,55 @@ substituted before the search.
 The panel sends the user's password to the directory to verify it. Over plain
 `ldap://` that crosses the network in the clear.
 :::
+
+### Finding a user's groups
+
+The role mapping can only work with the groups the directory actually hands
+back, and directories disagree about how to publish them. Each user's page under
+**Administration → Users** lists what their provider reported at their last
+sign-in — read that first, because an empty list and a wrong list have different
+fixes.
+
+The panel tries three things, in order:
+
+1. **`LDAP_GROUP_ATTRIBUTE` on the user entry**, matched without regard to case,
+   so a directory that returns `memberof` is read the same as one returning
+   `memberOf`.
+2. **Attributes other directories publish instead**, if that one came back
+   empty: `memberOf`, `isMemberOf`, `nsRole` and `groupMembership`. This covers
+   389/Red Hat DS, eDirectory and OpenLDAP with the `memberof` overlay without
+   any configuration.
+3. **A search of the group objects**, if `LDAP_GROUP_SEARCH_BASE` is set. Some
+   directories record membership only on the group, never on the user, and no
+   attribute on the user entry will ever show it. The default filter covers the
+   three usual schemas:
+
+   ```
+   (|(member={dn})(uniqueMember={dn})(memberUid={username}))
+   ```
+
+   Override it with `LDAP_GROUP_FILTER`; `{dn}` and `{username}` are substituted
+   before the search.
+
+Both the group's own name and its full DN are recorded, and the mapping matches
+either, ignoring case — so a configured `DNS-Admins` matches
+`CN=DNS-Admins,OU=Groups,DC=example,DC=com`. A sign-in that finds no groups at
+all is logged as a warning naming the attributes that were tried.
+
+#### Nested Active Directory groups
+
+`memberOf` reports only *direct* membership, so someone in a group that is
+itself a member of `DNS-Admins` looks like a member of nothing. Active Directory
+can resolve the chain server-side if you ask it to — set a group search base and
+this filter:
+
+```bash
+LDAP_GROUP_SEARCH_BASE=OU=Groups,DC=example,DC=com
+LDAP_GROUP_FILTER=(member:1.2.840.113556.1.4.1941:={dn})
+```
+
+That is AD's `LDAP_MATCHING_RULE_IN_CHAIN`. It is an Active Directory extension;
+other directories will reject it.
 
 ### OAuth 2.0 / OpenID Connect
 

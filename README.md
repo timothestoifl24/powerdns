@@ -522,6 +522,30 @@ The screenshots are captured from a running stack by
 `docs/scripts/capture-screenshots.mjs`; see the *Regenerating these* section of
 the screenshots page for the command.
 
+### Cutting a release
+
+Changes worth telling somebody about go under `## [Unreleased]` in
+[`CHANGELOG.md`](CHANGELOG.md) as they land. To release, rename that heading to
+the version, add the date and the compare link at the foot of the file, and push
+a tag:
+
+```bash
+git tag -a v1.2.3 -m 'v1.2.3'
+git push origin v1.2.3
+```
+
+`.github/workflows/release.yml` takes it from there. It checks that the tagged
+commit is on `main` and that CI passed on it, publishes all four images tagged
+`1.2.3` and `1.2` (and `latest`, unless the tag is a prerelease like
+`v1.2.3-rc1`), and creates the GitHub release.
+
+The release notes are assembled rather than typed: the `CHANGELOG.md` section
+for that version leads, and beneath it GitHub lists every pull request merged
+since the previous tag, sorted into the categories in `.github/release.yml`.
+Labelling a pull request is therefore what decides where it appears —
+`breaking`, `security`, `feature`/`enhancement`, `dependencies`, `bug`/`fix`,
+`docs`, `ci`. An unlabelled one still shows up, under *Other changes*.
+
 ## Troubleshooting
 
 **`Permission denied` reading `/run/secrets/...` and the database container

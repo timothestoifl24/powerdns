@@ -111,9 +111,12 @@ jobs:
           # Only CI's three gate jobs; the code scanning checks are a separate
           # signal and are not what decides whether the code works.
           # `filter=latest` keeps re-runs from resurrecting an old conclusion.
+          # `status` as well as `conclusion`: a job still running has a null
+          # conclusion, and reading only the conclusion would let a release out
+          # while CI was still deciding.
           conclusions=$(gh api \
             "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs?per_page=100&filter=latest" \
-            --jq '.check_runs[] | select(.name | test("Unit tests|Shell scripts|End-to-end")) | "\(.name)=\(.conclusion)"')
+            --jq '.check_runs[] | select(.name | test("Unit tests|Shell scripts|End-to-end")) | "\(.name)=\(.status)/\(.conclusion)"')
 
           if [ -z "$conclusions" ]; then
             echo "::error::no CI results found for $SHA -- has it been pushed to main?"
@@ -121,15 +124,23 @@ jobs:
           fi
           echo "$conclusions"
 
+          # Still running is not a pass. Blocking is right even though it is
+          # inconvenient: the alternative is publishing images and a release
+          # for a commit whose tests have not finished.
+          if printf '%s\n' "$conclusions" | grep -vq '^[^=]*=completed/'; then
+            echo "::error::CI has not finished on the commit being released; re-run this workflow once it has"
+            exit 1
+          fi
+
           # A real failure blocks the release. A run that was cancelled or
           # skipped -- which happens whenever a later push to main supersedes
           # an earlier one -- is reported but does not, because it is an
           # absence of evidence rather than evidence of a break.
-          if printf '%s\n' "$conclusions" | grep -Eq '=(failure|timed_out|action_required)$'; then
+          if printf '%s\n' "$conclusions" | grep -Eq '/(failure|timed_out|action_required)$'; then
             echo "::error::CI failed on the commit being released"
             exit 1
           fi
-          if printf '%s\n' "$conclusions" | grep -vq '=success$'; then
+          if printf '%s\n' "$conclusions" | grep -vq '/success$'; then
             echo "::warning::not every CI job on this commit concluded successfully; see the list above"
           fi
 

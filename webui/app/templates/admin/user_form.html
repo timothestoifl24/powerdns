@@ -58,12 +58,55 @@
               {% endfor %}
             </select>
             {% if user and not user.is_local %}
-              <small class="form-hint">
-                A group mapping is configured for this provider, so this may be overwritten
-                at the user's next sign-in.
-              </small>
+              {% if user.role_locked %}
+                <small class="form-hint">
+                  <i class="ti ti-lock me-1"></i>Set here rather than by the directory.
+                  The group mapping will not change it.
+                </small>
+              {% else %}
+                <small class="form-hint">
+                  Currently taken from the directory's group mapping. Saving a different
+                  role here pins it, and later group changes stop moving it.
+                </small>
+              {% endif %}
             {% endif %}
           </div>
+
+          {% if user and not user.is_local %}
+            <div class="mb-3">
+              {% if user.role_locked %}
+                <label class="form-check">
+                  <input class="form-check-input" type="checkbox" name="role_from_directory">
+                  <span class="form-check-label">Hand the role back to the group mapping</span>
+                  <span class="form-check-description">
+                    From the next sign-in the directory decides the role again, which can
+                    lower it.
+                  </span>
+                </label>
+              {% endif %}
+              <div class="mt-3">
+                <div class="form-label">Groups reported at the last sign-in</div>
+                {% if user.directory_groups %}
+                  <div class="small font-monospace text-secondary">
+                    {% for group in user.directory_groups %}
+                      <div>{{ group }}</div>
+                    {% endfor %}
+                  </div>
+                  <small class="form-hint">
+                    Compare these with the groups configured on the
+                    <a href="{{ url_for('authproviders.index') }}">sign-in provider</a>. A
+                    group is matched by its full DN or by its first component, ignoring case.
+                  </small>
+                {% else %}
+                  <div class="text-secondary small">
+                    None recorded yet. They are stored at the next sign-in; an empty list
+                    afterwards means the directory sent no groups — usually the wrong group
+                    attribute, or a server that does not publish <code>memberOf</code>.
+                  </div>
+                {% endif %}
+              </div>
+            </div>
+          {% endif %}
 
           {% if not user %}
             <div class="row g-3">

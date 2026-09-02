@@ -74,6 +74,17 @@ def env_int(name: str, default: int) -> int:
         raise ConfigError(f"{name}={raw!r} is not an integer") from exc
 
 
+def env_name(name: str, default: str) -> str:
+    """An identifier-like setting where blank means "use the default".
+
+    Attribute names, claim names and search filters have no meaningful empty
+    value: an empty group attribute is not "look at no attribute", it is a
+    misconfiguration that silently strips every user of their groups. Unset and
+    set-to-blank therefore mean the same thing here.
+    """
+    return env_str(name, default) or default
+
+
 def env_list(name: str, default: tuple[str, ...] = ()) -> list[str]:
     raw = env_str(name)
     if not raw:
@@ -198,14 +209,14 @@ class LdapConfig:
             bind_dn=env_str("LDAP_BIND_DN"),
             bind_password=env_secret("LDAP_BIND_PASSWORD"),
             base_dn=base_dn,
-            user_filter=env_str(
+            user_filter=env_name(
                 "LDAP_USER_FILTER",
                 "(&(objectClass=person)({username_attribute}={username}))",
             ),
-            username_attribute=env_str("LDAP_USERNAME_ATTRIBUTE", "uid"),
-            email_attribute=env_str("LDAP_EMAIL_ATTRIBUTE", "mail"),
-            display_name_attribute=env_str("LDAP_DISPLAY_NAME_ATTRIBUTE", "cn"),
-            group_attribute=env_str("LDAP_GROUP_ATTRIBUTE", "memberOf"),
+            username_attribute=env_name("LDAP_USERNAME_ATTRIBUTE", "uid"),
+            email_attribute=env_name("LDAP_EMAIL_ATTRIBUTE", "mail"),
+            display_name_attribute=env_name("LDAP_DISPLAY_NAME_ATTRIBUTE", "cn"),
+            group_attribute=env_name("LDAP_GROUP_ATTRIBUTE", "memberOf"),
             group_search_base=env_str("LDAP_GROUP_SEARCH_BASE"),
             group_filter=env_str("LDAP_GROUP_FILTER"),
             connect_timeout=env_int("LDAP_CONNECT_TIMEOUT", 5),
@@ -441,6 +452,18 @@ def build_config() -> dict:
         "PDNS_API_KEY": env_secret("PDNS_API_KEY"),
         "PDNS_SERVER_ID": env_str("PDNS_SERVER_ID", "localhost"),
         "PDNS_API_TIMEOUT": env_int("PDNS_API_TIMEOUT", 10),
+        # PowerDNS Recursor HTTP API -- forward zones and global forwarders.
+        # Forwarding is off when either of the first two is empty, and the
+        # Forwarding page then explains what to set rather than erroring.
+        "RECURSOR_API_URL": env_str("RECURSOR_API_URL").rstrip("/"),
+        "RECURSOR_API_KEY": env_secret("RECURSOR_API_KEY"),
+        "RECURSOR_SERVER_ID": env_str("RECURSOR_SERVER_ID", "localhost"),
+        "RECURSOR_API_TIMEOUT": env_int("RECURSOR_API_TIMEOUT", 10),
+        # Where the recursor should send queries for the zones this stack is
+        # authoritative for. Forward targets are addresses, never names, so
+        # this is an IP even though the service is reachable as "pdns".
+        "PDNS_DNS_ADDRESS": env_str("PDNS_DNS_ADDRESS"),
+        "PDNS_DNS_PORT": env_int("PDNS_DNS_PORT", 53),
         # Zone defaults offered on the "new zone" form
         "DEFAULT_NAMESERVERS": env_list("DEFAULT_NAMESERVERS"),
         "DEFAULT_SOA_EDIT_API": env_str("DEFAULT_SOA_EDIT_API", "DEFAULT"),

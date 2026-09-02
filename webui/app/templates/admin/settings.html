@@ -40,6 +40,40 @@
       </div>
 
       <div class="card mt-3">
+        <div class="card-header"><h3 class="card-title">Recursor (forwarding)</h3></div>
+        <div class="card-body">
+          {% if recursor_status.configured %}
+            <dl class="row mb-0">
+              <dt class="col-5 text-secondary">API endpoint</dt>
+              <dd class="col-7 font-monospace">{{ recursor_status.url }}</dd>
+              <dt class="col-5 text-secondary">Status</dt>
+              <dd class="col-7">
+                {% if recursor_status.reachable %}
+                  <span class="badge bg-success-lt"><i class="ti ti-check me-1"></i>Reachable</span>
+                {% else %}
+                  <span class="badge bg-red-lt"><i class="ti ti-x me-1"></i>Unreachable</span>
+                {% endif %}
+              </dd>
+              <dt class="col-5 text-secondary">Forward zones</dt>
+              <dd class="col-7">{{ recursor_status.forward_zones }}</dd>
+              <dt class="col-5 text-secondary">Authoritative server</dt>
+              <dd class="col-7 font-monospace">{{ recursor_status.local_target or '—' }}</dd>
+              {% if recursor_status.error %}
+                <dt class="col-5 text-secondary">Error</dt>
+                <dd class="col-7 text-danger small">{{ recursor_status.error }}</dd>
+              {% endif %}
+            </dl>
+          {% else %}
+            <p class="text-secondary mb-0">
+              Not configured, so the Forwarding page is hidden. Forward zones and
+              global forwarders need a PowerDNS Recursor: the Authoritative Server
+              has had no <code>recursor=</code> setting since 4.1.
+            </p>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="card mt-3">
         <div class="card-header"><h3 class="card-title">Session and proxy</h3></div>
         <div class="card-body">
           <dl class="row mb-0">

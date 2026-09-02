@@ -103,8 +103,21 @@
                         below matches either the DN or its common name.') }}
               {{ field('group_search_base', 'Group search base',
                        provider.setting('group_search_base'),
-                       'Only for directories without memberOf, such as posixGroup setups.') }}
-              {{ field('group_filter', 'Group filter', provider.setting('group_filter')) }}
+                       'Searches the group objects as well as the user entry. Needed for
+                        directories without memberOf, such as posixGroup setups, and for
+                        nested Active Directory groups.') }}
+              {{ field('group_filter', 'Group filter', provider.setting('group_filter'),
+                       'Optional. Leave blank to match member, uniqueMember and memberUid.
+                        For nested Active Directory groups use
+                        (member:1.2.840.113556.1.4.1941:={dn}) — a user in a group that is
+                        itself a member of the mapped group is only found this way.
+                        {dn} and {username} are substituted.') }}
+              <div class="alert alert-info mt-2 mb-0">
+                <i class="ti ti-info-circle me-2"></i>
+                If someone signs in but does not get the role their group should grant,
+                open their entry under Users: the groups the directory actually sent are
+                listed there, which is what the mapping below is compared against.
+              </div>
 
             {% elif kind == 'oauth' %}
               <p class="text-secondary">

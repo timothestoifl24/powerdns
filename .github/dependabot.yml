@@ -45,12 +45,13 @@ updates:
           - patch
 
   # ------------------------------------------------------------ Base images
-  # postgres:17-alpine, debian:trixie-slim and python:3.13-slim-trixie. These
+  # postgres:17-alpine, debian:trixie-slim and the Python slim image. These
   # carry the OS-level security fixes that never show up in requirements.txt.
   - package-ecosystem: docker
     directories:
       - /db
       - /pdns
+      - /recursor
       - /webui
     schedule:
       interval: weekly

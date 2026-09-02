@@ -167,9 +167,22 @@ def update_user(user_id: int):
     if user.role != role:
         changes.append(f"role {user.role}->{role}")
         user.role = role
+        if not user.is_local:
+            # Without this the group mapping recomputes the role at this
+            # person's next sign-in and the change silently disappears. An
+            # administrator picking a role by hand means it, so pin it; the
+            # checkbox below is how they hand it back to the directory.
+            user.role_locked = True
     if user.is_active != is_active:
         changes.append("activated" if is_active else "deactivated")
         user.is_active = is_active
+
+    if not user.is_local and request.form.get("role_from_directory") == "on":
+        # Explicitly handing the role back: the group mapping applies again
+        # from the next sign-in, including demoting this account.
+        if user.role_locked:
+            changes.append("role handed back to the group mapping")
+        user.role_locked = False
 
     if user.is_local:
         user.display_name = (request.form.get("display_name") or "").strip()[:190]
@@ -259,6 +272,41 @@ def audit_log():
     return render_template("admin/audit.html", entries=audit.recent(limit), limit=limit)
 
 
+def _recursor_status(config) -> dict[str, object]:
+    """What the settings page says about forwarding.
+
+    Never raises: this page is where an operator looks when something is
+    wrong, so a broken recursor has to be reported here rather than replace
+    the page with a 500.
+    """
+    from ..recursor import client_from_config as recursor_client_from_config
+    from ..recursor import is_configured as recursor_is_configured
+    from ..recursor import local_zone_target
+
+    if not recursor_is_configured(config):
+        return {"configured": False}
+
+    status: dict[str, object] = {
+        "configured": True,
+        "url": config["RECURSOR_API_URL"],
+        "reachable": False,
+        "forward_zones": 0,
+        "local_target": "",
+        "error": None,
+    }
+    try:
+        status["local_target"] = local_zone_target(config)
+    except Exception as exc:  # noqa: BLE001 - reported, not raised
+        status["error"] = str(exc)
+    try:
+        zones = recursor_client_from_config(config).forward_zones()
+        status["reachable"] = True
+        status["forward_zones"] = len(zones)
+    except Exception as exc:  # noqa: BLE001 - reported, not raised
+        status["error"] = str(exc)
+    return status
+
+
 @bp.route("/settings")
 @admin_required
 def settings():
@@ -282,6 +330,7 @@ def settings():
         "admin/settings.html",
         auth=config["AUTH"],
         pdns_status=pdns_status,
+        recursor_status=_recursor_status(config),
         pdns_url=config["PDNS_API_URL"],
         base_url=config["BASE_URL"],
         default_nameservers=config["DEFAULT_NAMESERVERS"],

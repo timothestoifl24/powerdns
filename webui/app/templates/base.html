@@ -46,6 +46,14 @@
               <span class="nav-link-title">Zones</span>
             </a>
           </li>
+          {% if forwarding_enabled and current_user.is_operator %}
+          <li class="nav-item {{ 'active' if request.blueprint == 'forwarding' }}">
+            <a class="nav-link" href="{{ url_for('forwarding.index') }}">
+              <span class="nav-link-icon"><i class="ti ti-route"></i></span>
+              <span class="nav-link-title">Forwarding</span>
+            </a>
+          </li>
+          {% endif %}
           {% if current_user.is_admin %}
           <li class="nav-item dropdown {{ 'active' if request.blueprint in ('admin', 'authproviders') }}">
             <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown"

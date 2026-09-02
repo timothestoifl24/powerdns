@@ -30,6 +30,9 @@ from ..pdns import (
     client_from_config,
     relative_name,
 )
+from ..recursor import RecursorNotConfigured, local_zone_target
+from ..recursor import client_from_config as recursor_client_from_config
+from ..recursor import is_configured as recursor_is_configured
 from ..security import (
     current_user,
     flash_errors,
@@ -48,6 +51,41 @@ MANAGED_TYPES = frozenset({"RRSIG", "NSEC", "NSEC3", "NSEC3PARAM", "DNSKEY", "CD
 
 def _client():
     return client_from_config(current_app.config)
+
+
+def _forward_locally(zone_name: str, *, remove: bool = False) -> None:
+    """Keep the recursor's rule for one local zone in step.
+
+    The recursor is the front door, so a zone the authoritative server has just
+    started (or stopped) hosting is answered from the public internet until it
+    learns about the change. Doing it here means a new zone resolves at once
+    rather than at the next visit to the Forwarding page.
+
+    Best effort on purpose: forwarding not being configured, or the recursor
+    being down, must not fail a zone operation that already succeeded.
+    """
+    config = current_app.config
+    if not recursor_is_configured(config):
+        return
+    try:
+        client = recursor_client_from_config(config)
+        target = local_zone_target(config)
+        if remove:
+            existing = client.get_forward_zone(zone_name)
+            # Only ours to remove. A rule pointing elsewhere is an operator's
+            # deliberate configuration that happens to share the name.
+            if existing is None or tuple(existing.servers) != (target,):
+                return
+            client.delete_forward_zone(zone_name)
+        else:
+            client.save_forward_zone(zone_name, [target], recursion_desired=False)
+    except (PdnsError, RecursorNotConfigured, ValueError) as exc:
+        log.warning("could not update recursor forwarding for %s: %s", zone_name, exc)
+        flash(
+            f"The zone was saved, but the resolver could not be told about it: {exc} "
+            "Open Forwarding to retry.",
+            "warning",
+        )
 
 
 def _handle_pdns_error(exc: PdnsError, action: str):
@@ -146,6 +184,7 @@ def create():
             detail=f"kind={kind} dnssec={dnssec}",
             actor=user,
         )
+        _forward_locally(zone.get("name") or canonical(name))
         flash(f"Zone {zone.get('name', name)} has been created.", "success")
         return redirect(url_for("zones.detail", zone_id=zone.get("id") or canonical(name)))
 
@@ -326,6 +365,7 @@ def delete(zone_id: str):
         return redirect(url_for("zones.detail", zone_id=zone_id))
 
     audit.record("zone.delete", target=zone_name, actor=user)
+    _forward_locally(zone_name, remove=True)
     flash(f"Zone {zone_name} and all of its records have been deleted.", "success")
     return redirect(url_for("zones.index"))
 

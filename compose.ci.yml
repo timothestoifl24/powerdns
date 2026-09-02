@@ -11,3 +11,11 @@ services:
       # through the API seconds ago can be invisible to a query for minutes.
       # 0 disables the cache, which is what makes the smoke test deterministic.
       PDNS_SETTING_zone_cache_refresh_interval: "0"
+
+  recursor:
+    environment:
+      # The smoke test needs to see what the recursor decided: at the default
+      # level everything below Warning is suppressed, including the lines that
+      # say which addresses it bound and which zones it loaded from the API.
+      RECURSOR_LOGLEVEL: "6"
+      RECURSOR_QUIET: "false"

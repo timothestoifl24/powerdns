@@ -11,7 +11,7 @@ import logging
 import re
 
 from flask import Flask, current_app, g
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -134,4 +134,69 @@ def create_all(app: Flask) -> None:
             log.debug("could not ensure schema %s exists: %s", schema, exc)
 
     Base.metadata.create_all(engine, checkfirst=True)
+    add_missing_columns(engine)
     log.info("database schema is up to date")
+
+
+def add_missing_columns(engine: Engine) -> None:
+    """Add columns that exist in the models but not yet in the database.
+
+    ``create_all`` creates whole tables and stops there, so a column added to a
+    model after a deployment is running would never appear -- every query
+    against that table would then fail with "column does not exist". The panel
+    has no migration framework on purpose (one schema, one writer), so this
+    covers the one case that actually happens: a new nullable-or-defaulted
+    column on an existing table.
+
+    Only additive changes are attempted. Anything that needs a type change, a
+    rename or a backfill is deliberately out of scope and would be a real
+    migration.
+    """
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+
+    for table in Base.metadata.sorted_tables:
+        if table.name not in existing_tables:
+            continue  # create_all just made it, with every column.
+        present = {column["name"] for column in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in present:
+                continue
+            if not column.nullable and column.server_default is None and column.default is None:
+                # Adding a NOT NULL column with no default to a table that
+                # already has rows cannot succeed. Say so rather than emitting
+                # DDL that will fail with a less obvious message.
+                log.error(
+                    "column %s.%s is missing and cannot be added automatically "
+                    "(NOT NULL with no default); add it by hand",
+                    table.name,
+                    column.name,
+                )
+                continue
+            ddl = _add_column_ddl(engine, table.name, column)
+            try:
+                with engine.begin() as connection:
+                    connection.execute(text(ddl))
+                log.info("added missing column %s.%s", table.name, column.name)
+            except Exception:  # pragma: no cover - depends on database grants
+                log.exception("could not add column %s.%s", table.name, column.name)
+
+
+def _add_column_ddl(engine: Engine, table_name: str, column) -> str:
+    """The ALTER TABLE for one new column, including its default.
+
+    The default is rendered into the DDL so existing rows get a value: a
+    Python-side ``default=`` only applies to rows this process inserts, and
+    every row already in the table would otherwise be NULL in a NOT NULL
+    column.
+    """
+    from sqlalchemy.schema import CreateColumn
+
+    spec = str(CreateColumn(column).compile(engine))
+    default = column.default
+    if default is not None and getattr(default, "is_scalar", False):
+        literal = column.type.literal_processor(dialect=engine.dialect)
+        rendered = literal(default.arg) if literal else None
+        if rendered is not None:
+            spec = f"{spec} DEFAULT {rendered}"
+    return f'ALTER TABLE "{table_name}" ADD COLUMN {spec}'

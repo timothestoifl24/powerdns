@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Forwarding · {{ site_name }}{% endblock %}
+{% block header_title %}Forwarding{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div class="card-body">
+      <div class="empty">
+        <div class="empty-icon"><i class="ti ti-route-off"></i></div>
+        <p class="empty-title">No recursor is configured</p>
+        <p class="empty-subtitle text-secondary">
+          Forward zones and global forwarders are a PowerDNS Recursor feature.
+          The Authoritative Server that holds your zones cannot forward: the
+          <code>recursor=</code> setting was removed in PowerDNS Authoritative 4.1.
+        </p>
+        <p class="empty-subtitle text-secondary">
+          The bundled <code>recursor</code> service in <code>compose.yml</code>
+          sets this up. If you are running the panel against your own PowerDNS,
+          point it at a recursor with <code>RECURSOR_API_URL</code> and
+          <code>RECURSOR_API_KEY</code>, and set <code>PDNS_DNS_ADDRESS</code> to
+          the address of the authoritative server so its zones stay answerable.
+        </p>
+      </div>
+    </div>
+  </div>
+{% endblock %}

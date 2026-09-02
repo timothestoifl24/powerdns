@@ -69,12 +69,35 @@ def normalise_username(raw: str) -> str:
     return username
 
 
+#: Enough to diagnose a mapping problem without storing an unbounded blob for
+#: someone who is a member of several hundred Active Directory groups.
+MAX_RECORDED_GROUPS = 200
+
+
+def _group_summary(groups: list[str]) -> str:
+    """The groups a directory reported, deduplicated, one per line.
+
+    Non-string entries are dropped rather than raising: identity providers do
+    put nulls in a groups array, and that must not break a sign-in.
+    """
+    seen = dict.fromkeys(
+        group.strip() for group in (groups or ()) if isinstance(group, str) and group.strip()
+    )
+    return "\n".join(list(seen)[:MAX_RECORDED_GROUPS])
+
+
 def resolve_identity(claim: IdentityClaim, roles: GroupRoleMap) -> User:
     """Find or create the user for ``claim``, applying the role mapping.
 
     Raises :class:`ProvisioningError` when the person is not entitled to access,
     which is what a ``*_DEFAULT_ROLE=none`` setting means for someone who
     matched no group.
+
+    The group mapping decides the role on every sign-in, so a change at the
+    directory takes effect immediately. The one exception is an account whose
+    role an administrator set by hand: see ``User.role_locked``. Admission is
+    still decided by the mapping even then -- pinning a role must not turn into
+    a way to keep access after being removed from every group that grants it.
     """
     role = roles.resolve(claim.groups)
     if role is None:
@@ -143,11 +166,24 @@ def resolve_identity(claim: IdentityClaim, roles: GroupRoleMap) -> User:
         user.email = claim.email
     if claim.display_name:
         user.display_name = claim.display_name
-    if user.role != role:
+    # Recorded whatever happens to the role: this is the only place the groups
+    # the directory actually sent are visible, and "I am in the admin group but
+    # I am not an admin" is otherwise unanswerable without container logs.
+    user.last_groups = _group_summary(claim.groups)
+
+    if user.role_locked:
+        if user.role != role:
+            log.info(
+                "%s: keeping the manually assigned role %r; the group mapping would have given %r",
+                username,
+                user.role,
+                role,
+            )
+    elif user.role != role:
         audit.record(
             "user.role_change",
             target=username,
-            detail=f"{user.role} -> {role}",
+            detail=f"{user.role} -> {role} (from group mapping)",
             commit=False,
         )
         user.role = role

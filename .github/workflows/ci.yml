@@ -95,6 +95,11 @@ jobs:
           {
             echo 'DNS_BIND_ADDRESS=127.0.0.1'
             echo 'DNS_PORT=5353'
+            # The recursor is the front door on DNS_PORT; publish the
+            # authoritative server as well so each half can be queried on its
+            # own and a failure says which one is at fault.
+            echo 'AUTH_DNS_BIND_ADDRESS=127.0.0.1'
+            echo 'AUTH_DNS_PORT=5300'
           } >> .env
 
       - name: Build images
@@ -115,7 +120,7 @@ jobs:
           set -euo pipefail
           for attempt in $(seq 1 60); do
             unhealthy=""
-            for service in db pdns webui; do
+            for service in db pdns recursor webui; do
               id=$(docker compose ps -q "$service")
               if [ -z "$id" ]; then unhealthy="$unhealthy $service(missing)"; continue; fi
               state=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$id")
@@ -242,9 +247,10 @@ jobs:
           PY
 
           # The real test: PowerDNS reads it back out of PostgreSQL and answers
-          # a query on port 53.
+          # a query. Asked of the authoritative server directly, so this stays
+          # a test of pdns alone -- the recursor path is checked next.
           for attempt in $(seq 1 12); do
-            answer=$(dig +short @127.0.0.1 -p 5353 www.smoke.test A || true)
+            answer=$(dig +short @127.0.0.1 -p 5300 www.smoke.test A || true)
             [ "$answer" = "192.0.2.42" ] && break
             echo "attempt $attempt: got '${answer:-<empty>}', retrying"
             sleep 5
@@ -252,10 +258,301 @@ jobs:
           echo "dig returned: ${answer:-<empty>}"
           if [ "$answer" != "192.0.2.42" ]; then
             echo "::error::PowerDNS did not serve the record created through the API"
-            dig @127.0.0.1 -p 5353 www.smoke.test A || true
+            dig @127.0.0.1 -p 5300 www.smoke.test A || true
             docker compose logs --tail 50 pdns
             exit 1
           fi
+
+      - name: A shared sign-in for the steps that drive the panel
+        run: |
+          set -euo pipefail
+          jar=/tmp/panel.jar
+          token=$(curl -fsS -c "$jar" http://localhost:9191/auth/login \
+                  | grep -o 'name="csrf_token" value="[^"]*"' | head -1 | cut -d'"' -f4)
+          curl -fsS -b "$jar" -c "$jar" -o /dev/null \
+            -X POST http://localhost:9191/auth/login \
+            --data-urlencode "username=admin" \
+            --data-urlencode "password=$(cat secrets/webui_admin_password)" \
+            --data-urlencode "csrf_token=$token"
+          # The CSRF token is per session, so one read is enough for every POST
+          # below. Taken from a page that does not itself reconcile forwarding,
+          # which matters for the global-forwarder test further down.
+          curl -fsS -b "$jar" http://localhost:9191/zones/ \
+            | grep -o 'name="csrf_token" value="[^"]*"' | head -1 | cut -d'"' -f4 > /tmp/panel.csrf
+          echo "signed in; token length $(wc -c < /tmp/panel.csrf)"
+
+      - name: The recursor answers for the authoritative zones
+        run: |
+          set -euo pipefail
+          # The recursor is the front door, so a zone this stack hosts is only
+          # answerable there if the panel keeps a forward rule pointing at the
+          # authoritative server. Ask it to reconcile, then query the recursor.
+          curl -fsS -b /tmp/panel.jar -o /dev/null -X POST \
+            http://localhost:9191/forwarding/sync \
+            --data-urlencode "csrf_token=$(cat /tmp/panel.csrf)"
+
+          # What the recursor actually knows, before any dig. A silent retry
+          # loop cannot distinguish "the rule was never created" from "the
+          # rule exists but the query never arrives", and those have entirely
+          # different fixes.
+          echo "--- what the recursor is forwarding, and where pdns is ---"
+          docker compose exec -T webui python - "$(cat secrets/recursor_api_key)" <<'PY'
+          import json, socket, sys, urllib.request
+
+          request = urllib.request.Request(
+              "http://recursor:8082/api/v1/servers/localhost/zones",
+              headers={"X-API-Key": sys.argv[1]},
+          )
+          with urllib.request.urlopen(request, timeout=10) as response:
+              zones = json.load(response)
+          forwarded = {z["name"]: z["servers"] for z in zones if z["kind"] == "Forwarded"}
+          print("forwarded:", json.dumps(forwarded, indent=2, sort_keys=True))
+          print("pdns resolves to:", socket.gethostbyname("pdns"))
+          print("recursor resolves to:", socket.gethostbyname("recursor"))
+          PY
+
+          # dig sets the DNSSEC OK bit by default, so this doubles as the
+          # regression test for validating a forwarded zone: a resolver that
+          # tried would ask the root whether smoke.test is signed, be told it
+          # does not exist there, and SERVFAIL a correct answer.
+          for attempt in $(seq 1 10); do
+            answer=$(dig +short @127.0.0.1 -p 5353 www.smoke.test A || true)
+            [ "$answer" = "192.0.2.42" ] && break
+            status=$(dig @127.0.0.1 -p 5353 www.smoke.test A +time=3 +tries=1 \
+                     | grep -oP 'status: \K[A-Z]+' | head -1 || true)
+            echo "attempt $attempt: got '${answer:-<empty>}' (${status:-no reply})"
+            sleep 5
+          done
+          echo "dig via the recursor returned: ${answer:-<empty>}"
+          if [ "$answer" != "192.0.2.42" ]; then
+            echo "::error::the recursor did not answer for an authoritative zone"
+            echo "--- is the recursor listening on 53 at all? ---"
+            docker compose exec -T recursor timeout 2 bash -c '</dev/tcp/127.0.0.1/53' \
+              && echo "port 53 inside the container: open" \
+              || echo "port 53 inside the container: CLOSED"
+            echo "--- straight at the recursor from inside the network ---"
+            docker compose exec -T webui python -c "
+          import socket
+          s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(4)
+          # A minimal A query for www.smoke.test, so this does not need dig.
+          q = (b'\xab\xcd\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00'
+               b'\x03www\x05smoke\x04test\x00\x00\x01\x00\x01')
+          try:
+              s.sendto(q, ('recursor', 53))
+              data, _ = s.recvfrom(512)
+              print('recursor replied, rcode', data[3] & 0x0F, 'answers', data[7])
+          except Exception as exc:
+              print('no reply from recursor:53 --', type(exc).__name__, exc)
+          " || true
+            docker compose logs --tail 80 recursor
+            exit 1
+          fi
+
+      - name: A forward zone created in the panel resolves
+        run: |
+          set -euo pipefail
+          # A zone the authoritative server holds but that no forward rule
+          # covers yet: it did not exist at the reconcile above, so the only
+          # rule for it will be the one created through the panel below.
+          docker compose exec -T webui python - "$(cat secrets/pdns_api_key)" <<'PY'
+          import json, sys, urllib.request
+
+          key = sys.argv[1]
+
+          def call(method, path, body):
+              request = urllib.request.Request(
+                  "http://pdns:8081/api/v1" + path,
+                  method=method,
+                  data=json.dumps(body).encode(),
+                  headers={"X-API-Key": key, "Content-Type": "application/json"},
+              )
+              with urllib.request.urlopen(request, timeout=15) as response:
+                  print(method, path, "->", response.status)
+
+          call("POST", "/servers/localhost/zones", {
+              "name": "fwd.test.", "kind": "Native", "nameservers": ["ns1.fwd.test."],
+          })
+          call("PATCH", "/servers/localhost/zones/fwd.test.", {
+              "rrsets": [{
+                  "name": "host.fwd.test.", "type": "A", "ttl": 60,
+                  "changetype": "REPLACE",
+                  "records": [{"content": "192.0.2.77", "disabled": False}],
+              }]
+          })
+          PY
+
+          curl -fsS -b /tmp/panel.jar -o /dev/null -X POST \
+            http://localhost:9191/forwarding/new \
+            --data-urlencode "name=fwd.test" \
+            --data-urlencode "servers=${PDNS_STATIC_IP:-172.29.0.10}" \
+            --data-urlencode "csrf_token=$(cat /tmp/panel.csrf)"
+
+          for attempt in $(seq 1 12); do
+            answer=$(dig +short @127.0.0.1 -p 5353 host.fwd.test A || true)
+            [ "$answer" = "192.0.2.77" ] && break
+            echo "attempt $attempt: got '${answer:-<empty>}', retrying"
+            sleep 5
+          done
+          echo "forward zone resolved to: ${answer:-<empty>}"
+          if [ "$answer" != "192.0.2.77" ]; then
+            echo "::error::a forward zone created in the panel did not take effect"
+            curl -fsS -b /tmp/panel.jar http://localhost:9191/forwarding/ | grep -i fwd.test || true
+            docker compose logs --tail 50 recursor
+            exit 1
+          fi
+          # And it is listed on the page.
+          curl -fsS -b /tmp/panel.jar http://localhost:9191/forwarding/ | grep -q "fwd.test."
+
+          # Explicitly with and without the DNSSEC OK bit. A forwarded zone is
+          # answered from outside the public chain, so a resolver that
+          # validated it would SERVFAIL the +dnssec form while the plain one
+          # worked -- which is what shipped before this was pinned.
+          for flag in +dnssec +nodnssec; do
+            got=$(dig +short "$flag" @127.0.0.1 -p 5353 host.fwd.test A || true)
+            echo "  dig $flag -> ${got:-<empty>}"
+            [ "$got" = "192.0.2.77" ] || {
+              echo "::error::a forwarded zone does not answer with $flag"
+              exit 1
+            }
+          done
+
+      - name: Global forwarders take effect
+        run: |
+          set -euo pipefail
+          # A zone with no forward rule of its own: the recursor has to fall
+          # back to the global forwarders to answer for it. Created after the
+          # reconcile, and nothing below loads the Forwarding page, so no
+          # local-zone rule can appear and make this pass for the wrong reason.
+          docker compose exec -T webui python - "$(cat secrets/pdns_api_key)" <<'PY'
+          import json, sys, urllib.request
+
+          key = sys.argv[1]
+
+          def call(method, path, body):
+              request = urllib.request.Request(
+                  "http://pdns:8081/api/v1" + path,
+                  method=method,
+                  data=json.dumps(body).encode(),
+                  headers={"X-API-Key": key, "Content-Type": "application/json"},
+              )
+              with urllib.request.urlopen(request, timeout=15) as response:
+                  print(method, path, "->", response.status)
+
+          call("POST", "/servers/localhost/zones", {
+              "name": "global.test.", "kind": "Native", "nameservers": ["ns1.global.test."],
+          })
+          call("PATCH", "/servers/localhost/zones/global.test.", {
+              "rrsets": [{
+                  "name": "host.global.test.", "type": "A", "ttl": 60,
+                  "changetype": "REPLACE",
+                  "records": [{"content": "192.0.2.88", "disabled": False}],
+              }]
+          })
+          PY
+
+          # Before: nothing forwards it, so the recursor resolves it from the
+          # root servers and finds nothing -- .test is reserved and never
+          # delegated. An answer here would mean the test proves nothing.
+          before=$(dig +short @127.0.0.1 -p 5353 host.global.test A || true)
+          echo "before global forwarders: '${before:-<empty>}'"
+          if [ -n "$before" ]; then
+            echo "::error::host.global.test resolved before any forwarder was set"
+            exit 1
+          fi
+
+          curl -fsS -b /tmp/panel.jar -o /dev/null -X POST \
+            http://localhost:9191/forwarding/global \
+            --data-urlencode "servers=${PDNS_STATIC_IP:-172.29.0.10}" \
+            --data-urlencode "csrf_token=$(cat /tmp/panel.csrf)"
+
+          for attempt in $(seq 1 12); do
+            answer=$(dig +short @127.0.0.1 -p 5353 host.global.test A || true)
+            [ "$answer" = "192.0.2.88" ] && break
+            echo "attempt $attempt: got '${answer:-<empty>}', retrying"
+            sleep 5
+          done
+          echo "after global forwarders: ${answer:-<empty>}"
+          if [ "$answer" != "192.0.2.88" ]; then
+            echo "::error::global forwarders did not take effect"
+            docker compose logs --tail 50 recursor
+            exit 1
+          fi
+
+      - name: Forward zones survive a restart of the recursor
+        run: |
+          set -euo pipefail
+          # They live in the recursor's api-config-dir, which is a named
+          # volume. Without it every forward zone is lost when the container
+          # is replaced, and nothing else in this job would notice.
+          docker compose restart recursor
+          sleep 10
+
+          # Asked of the recursor's own API rather than with dig: the global
+          # forwarders set above also point at the authoritative server, so a
+          # query for host.fwd.test would still be answered even if this
+          # zone's rule had been lost. The zone list cannot pass for that
+          # reason.
+          docker compose exec -T webui python - "$(cat secrets/recursor_api_key)" <<'PY'
+          import json, sys, urllib.error, urllib.request
+
+          key = sys.argv[1]
+          request = urllib.request.Request(
+              "http://recursor:8082/api/v1/servers/localhost/zones",
+              headers={"X-API-Key": key},
+          )
+          for attempt in range(12):
+              try:
+                  with urllib.request.urlopen(request, timeout=10) as response:
+                      zones = json.load(response)
+                  break
+              except (urllib.error.URLError, TimeoutError) as exc:
+                  print("recursor not up yet:", exc)
+                  import time
+                  time.sleep(5)
+          else:
+              raise SystemExit("the recursor API never came back after the restart")
+
+          forwarded = {
+              zone["name"]: zone["servers"] for zone in zones if zone["kind"] == "Forwarded"
+          }
+          print("forwarded after restart:", json.dumps(forwarded, indent=2, sort_keys=True))
+          missing = [name for name in ("fwd.test.", ".", "smoke.test.") if name not in forwarded]
+          if missing:
+              raise SystemExit(f"lost after the restart: {missing}")
+          PY
+
+          # And it still answers.
+          for attempt in $(seq 1 12); do
+            answer=$(dig +short @127.0.0.1 -p 5353 host.fwd.test A || true)
+            [ "$answer" = "192.0.2.77" ] && break
+            echo "attempt $attempt: got '${answer:-<empty>}', retrying"
+            sleep 5
+          done
+          echo "after restart: ${answer:-<empty>}"
+          [ "$answer" = "192.0.2.77" ] || {
+            echo "::error::forward zones did not survive a restart"
+            docker compose logs --tail 50 recursor
+            exit 1
+          }
+
+      - name: The recursor is not an open resolver
+        run: |
+          set -euo pipefail
+          # allow-from is what keeps this off the list of resolvers used to
+          # amplify attacks on other people. Prove the default is narrow by
+          # reading it back out of the running configuration.
+          allow=$(docker compose exec -T recursor \
+                    sed -n '/^incoming:/,/^[a-z]/p' /etc/powerdns/recursor.yml \
+                    | grep 'allow_from:')
+          echo "$allow"
+          case "$allow" in
+            *0.0.0.0/0*|*"::/0"*)
+              echo "::error::the recursor is configured as an open resolver"
+              exit 1 ;;
+          esac
+          # And it really is the file the recursor read: a config it could not
+          # parse would have stopped the container long before this step.
+          docker compose exec -T recursor test -s /etc/powerdns/recursor.yml
 
       - name: The zone shows up in the panel for the administrator
         run: |
@@ -315,6 +612,8 @@ jobs:
         include:
           - context: ./pdns
             image: pdns
+          - context: ./recursor
+            image: pdns-recursor
           - context: ./db
             image: pdns-db
           - context: ./webui

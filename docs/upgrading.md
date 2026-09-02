@@ -43,6 +43,59 @@ sign-in provider secrets stored in `auth_providers`.
 down -v` deletes the `pgdata` volume, and with it every zone. Dump first.
 :::
 
+## Upgrading to the release that adds forwarding
+
+This one changes which server answers on port 53, so read it before pulling.
+
+A PowerDNS Recursor is now the front door. It answers for your zones by
+forwarding them to the authoritative server, and handles everything else
+according to the panel's Forwarding page. The authoritative server moves behind
+it and is no longer published on `DNS_PORT`.
+
+```bash
+git pull
+./scripts/generate-secrets.sh     # creates secrets/recursor_api_key; existing files are untouched
+docker compose up -d --build
+```
+
+Then check that your zones still answer:
+
+```bash
+dig @127.0.0.1 www.example.com A
+```
+
+What to expect:
+
+- **The compose network is recreated.** The authoritative server needs a fixed
+  address, because forward targets in PowerDNS are IP addresses and never names.
+  That means the `backend` network gains a subnet (`172.29.0.0/24` by default)
+  and is rebuilt, so every container restarts. Set `BACKEND_SUBNET` and
+  `PDNS_STATIC_IP` together if that subnet collides with one your host uses.
+- **`DNS_PORT` is now the recursor.** Add `AUTH_DNS_PORT=5300` if you want to
+  keep querying the authoritative server directly.
+- **A forward rule per zone appears.** The panel creates one for each
+  authoritative zone, pointing at the authoritative server, so your zones stay
+  answerable through the new front door. They are marked *local zone* on the
+  Forwarding page and maintained for you.
+- **The resolver is not open.** `RECURSOR_ALLOW_FROM` defaults to private
+  networks and loopback. If clients on other networks query this server, widen
+  it — to those networks, never to `0.0.0.0/0`.
+
+### Staying authoritative-only
+
+If you do not want a resolver at all, remove the `recursor` service from
+`compose.yml`, unset `RECURSOR_API_URL` in the webui service, and publish the
+authoritative server on `DNS_PORT` again. The Forwarding page then says it is
+unavailable and the nav entry disappears; nothing else changes.
+
+### One new column
+
+The panel adds `role_locked` and `last_groups` to its `users` table, so a role
+an administrator sets by hand is no longer overwritten by the directory's group
+mapping at the next sign-in. Both are added automatically at start-up — watch
+for `added missing column users.role_locked` in the log. Existing rows get the
+defaults, so nothing changes for accounts you have not touched.
+
 ## Upgrading the panel
 
 The ordinary case, and the safe one:
@@ -64,8 +117,8 @@ workers. Sessions do not survive the restart if `SECRET_KEY` changed; with the
 same secret file, they do.
 
 If you prefer published images to building locally, the CI pipeline pushes
-`ghcr.io/timothestoifl24/pdns-webui`, `…/pdns` and `…/pdns-db` on every merge to
-`main`, tagged `latest` and by commit SHA. Pin the SHA in production and move it
+`ghcr.io/timothestoifl24/pdns-webui`, `…/pdns`, `…/pdns-recursor` and
+`…/pdns-db` on every merge to `main`, tagged `latest` and by commit SHA. Pin the SHA in production and move it
 deliberately:
 
 ```yaml

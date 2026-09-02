@@ -255,11 +255,90 @@ more closely, add `repo.powerdns.com` in that Dockerfile instead. The schema in
 `db/schema/powerdns.sql` matches 4.9 — check the upstream schema before
 moving to a different major version.
 
+## Configuring the recursor
+
+Common settings have their own variables. Anything else the recursor
+understands goes in `RECURSOR_EXTRA_YAML`, which is written verbatim into the
+recursor's include directory:
+
+```yaml
+services:
+  recursor:
+    environment:
+      RECURSOR_ALLOW_FROM: 10.0.0.0/8,192.168.0.0/16
+      # Validation is off by default on purpose; see the guide.
+      RECURSOR_DNSSEC: process
+      RECURSOR_NEGATIVE_TRUSTANCHORS: corp.internal,10.in-addr.arpa
+      RECURSOR_THREADS: "4"
+      RECURSOR_EXTRA_YAML: |
+        recordcache:
+          max_entries: 2000000
+        recursor:
+          serve_rfc1918: false
+```
+
+It is real recursor YAML rather than a syntax of ours, so the
+[settings reference](https://doc.powerdns.com/recursor/yamlsettings.html)
+applies directly. Note the sections: settings are grouped under `incoming`,
+`recursor`, `webservice`, `dnssec`, `logging` and so on.
+
+### Why YAML and not the classic settings file
+
+PowerDNS Recursor 5.2 stopped reading the old `key=value` syntax unless
+`--enable-old-settings` is passed, and that option is documented as going away
+in a future release. Debian trixie ships 5.2, so this container writes YAML.
+Old-style names map onto YAML as `section.name` with dashes becoming
+underscores: `allow-from` is `incoming.allow_from`, `api-config-dir` is
+`webservice.api_dir`, `dnssec` is `dnssec.validation`.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `RECURSOR_ALLOW_FROM` | private networks + loopback | Who may use the resolver. **Never `0.0.0.0/0`** — see below. |
+| `RECURSOR_DNSSEC` | `process-no-validate` | Validation is off on purpose; see [DNSSEC and forwarding](/guide#dnssec-and-forwarding). |
+| `RECURSOR_NEGATIVE_TRUSTANCHORS` | — | Zones not to validate, needed if you set `process`. |
+| `RECURSOR_THREADS` | `2` | |
+| `RECURSOR_LOGLEVEL` | `4` | |
+| `RECURSOR_VERSION_STRING` | `anonymous` | What a `version.bind` query returns. |
+| `AUTH_DNS_BIND_ADDRESS` / `AUTH_DNS_PORT` | `127.0.0.1` / `5300` | Publishes the authoritative server directly, for debugging. |
+| `BACKEND_SUBNET` | `172.29.0.0/24` | The compose network. |
+| `PDNS_STATIC_IP` | `172.29.0.10` | The authoritative server's fixed address; must be inside `BACKEND_SUBNET`. |
+| `RECURSOR_EXTRA_YAML` | — | Extra recursor YAML, merged after the generated config. |
+
+### Why the authoritative server has a fixed address
+
+Forward targets in PowerDNS are IP addresses, never names: the recursor parses
+them at configuration time, before it has any way to resolve a name. So the
+recursor cannot be pointed at `pdns`, and the authoritative server gets a fixed
+address on the compose network instead — otherwise every local-zone forward rule
+would break the moment that container was recreated with a new address.
+
+Change `BACKEND_SUBNET` and `PDNS_STATIC_IP` together if the default subnet
+collides with a network your host already uses.
+
+### Do not make it an open resolver
+
+`RECURSOR_ALLOW_FROM` defaults to loopback and the private ranges. A recursor
+that answers the whole internet is found by scanners within days and used to
+amplify denial-of-service attacks against third parties, with your bandwidth.
+Widen it only to networks you control. The CI smoke test fails the build if the
+running configuration allows `0.0.0.0/0`.
+
+### Where forward zones are stored
+
+The recursor writes them into an `apizones` file in `webservice.api_dir` and
+reads it back at start, which is what makes them survive a restart. That
+directory is the `recursor-api` volume, and it is deliberately *not* the same
+as `recursor.include_dir` — under YAML settings the recursor requires the two
+to differ. The panel keeps no copy of its own, so what the Forwarding page
+shows is always what the resolver is actually doing.
+
 ## Running the panel outside compose
 
 The panel is an ordinary WSGI application; nothing ties it to this compose file.
 It needs three things: a PostgreSQL URL, the PowerDNS API endpoint and key, and a
-secret key.
+secret key. Add `RECURSOR_API_URL`, `RECURSOR_API_KEY` and `PDNS_DNS_ADDRESS` to
+enable the Forwarding page; leave them unset and it explains that forwarding is
+unavailable instead of failing.
 
 ```bash
 cd webui

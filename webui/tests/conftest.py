@@ -17,8 +17,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fake_pdns import FakePowerDNS  # noqa: E402
+from fake_recursor import FakeRecursor  # noqa: E402
 
 API_KEY = "testtesttesttest"
+RECURSOR_API_KEY = "recursor-test-key-1234"
 
 #: The environment every test starts from. Individual tests add to this via the
 #: `env` fixture to switch authentication backends on.
@@ -34,7 +36,16 @@ BASE_ENV = {
 }
 
 #: Cleared before each test so a leftover value cannot leak between them.
-MANAGED_PREFIXES = ("LDAP_", "OAUTH_", "SAML_", "PDNS_", "DB_", "LOCAL_AUTH", "BOOTSTRAP_")
+MANAGED_PREFIXES = (
+    "LDAP_",
+    "OAUTH_",
+    "SAML_",
+    "PDNS_",
+    "DB_",
+    "LOCAL_AUTH",
+    "BOOTSTRAP_",
+    "RECURSOR_",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -67,6 +78,7 @@ def pdns(monkeypatch) -> FakePowerDNS:
     from app.pdns import PdnsClient
     from app.views import admin as admin_views
     from app.views import dashboard as dashboard_views
+    from app.views import forwarding as forwarding_views
     from app.views import zones as zones_views
 
     def factory(config):
@@ -82,9 +94,51 @@ def pdns(monkeypatch) -> FakePowerDNS:
     # one needs patching -- including the app package, where /readyz lives.
     for module in (app_package, zones_views, dashboard_views, admin_views):
         monkeypatch.setattr(module, "client_from_config", factory)
+    # The forwarding views import it under an alias, because the name collides
+    # with the recursor's own client factory in that module.
+    monkeypatch.setattr(forwarding_views, "pdns_client_from_config", factory)
 
     fake.client_factory = factory
     return fake
+
+
+@pytest.fixture
+def recursor(monkeypatch) -> FakeRecursor:
+    """Install the fake recursor transport.
+
+    Like the `pdns` fixture, only the session handed to the client is swapped,
+    so the real RecursorClient code path -- zone-id encoding, the POST-then-PUT
+    fallback, error handling -- is what the tests exercise.
+    """
+    fake = FakeRecursor(api_key=RECURSOR_API_KEY)
+
+    from app import recursor as recursor_module
+    from app.recursor import RecursorClient
+    from app.views import forwarding as forwarding_views
+    from app.views import zones as zones_views
+
+    def factory(config):
+        return RecursorClient(
+            base_url=config["RECURSOR_API_URL"],
+            api_key=config["RECURSOR_API_KEY"],
+            server_id=config.get("RECURSOR_SERVER_ID", "localhost"),
+            timeout=config.get("RECURSOR_API_TIMEOUT", 10),
+            session=fake,
+        )
+
+    monkeypatch.setattr(recursor_module, "client_from_config", factory)
+    monkeypatch.setattr(forwarding_views, "client_from_config", factory)
+    monkeypatch.setattr(zones_views, "recursor_client_from_config", factory)
+    fake.client_factory = factory
+    return fake
+
+
+#: Added on top of BASE_ENV by the `forwarding_app` fixture.
+RECURSOR_ENV = {
+    "RECURSOR_API_URL": "http://recursor.test:8082",
+    "RECURSOR_API_KEY": RECURSOR_API_KEY,
+    "PDNS_DNS_ADDRESS": "172.29.0.10",
+}
 
 
 @pytest.fixture
@@ -108,6 +162,17 @@ def make_app(pdns):
 @pytest.fixture
 def app(make_app):
     return make_app()
+
+
+@pytest.fixture
+def forwarding_app(make_app, recursor):
+    """An app with the recursor configured, plus the fake behind it."""
+    return make_app(**RECURSOR_ENV)
+
+
+@pytest.fixture
+def forwarding_client(forwarding_app):
+    return forwarding_app.test_client()
 
 
 @pytest.fixture

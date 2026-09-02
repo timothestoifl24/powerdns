@@ -25,19 +25,34 @@ schema is loaded.
 ## How the pieces fit
 
 ```
-┌──────────────┐        HTTP API         ┌───────────────┐
-│    webui     │ ──────────────────────► │     pdns      │  :53 tcp/udp
-│  Flask +     │       X-API-Key         │   PowerDNS    │
-│  Tabler      │                         │ Authoritative │
-└──────┬───────┘                         └───────┬───────┘
-       │  schema: pdnsadmin                      │  schema: public
-       │  (users, grants, audit log)             │  (domains, records, DNSSEC)
-       └────────────────┬────────────────────────┘
-                        ▼
-                 ┌──────────────┐
-                 │      db      │  PostgreSQL 17
-                 └──────────────┘
+                       clients :53 tcp/udp
+                              │
+                              ▼
+┌──────────────┐  HTTP  ┌──────────────┐   forwards local zones
+│    webui     │ ─────► │   recursor   │ ──────────────┐
+│  Flask +     │        │  PowerDNS    │               │
+│  Tabler      │        │  Recursor    │ ──► upstream  │
+└──────┬───────┘        └──────────────┘    forwarders │
+       │                                               ▼
+       │  HTTP API, X-API-Key                 ┌───────────────┐
+       └────────────────────────────────────► │     pdns      │
+       │                                      │   PowerDNS    │
+       │  schema: pdnsadmin                   │ Authoritative │
+       │  (users, grants, audit log)          └───────┬───────┘
+       │                                              │ schema: public
+       └───────────────────┬──────────────────────────┘ (domains, records)
+                           ▼
+                    ┌──────────────┐
+                    │      db      │  PostgreSQL 17
+                    └──────────────┘
 ```
+
+Two DNS servers, because they do different jobs. The **authoritative server**
+holds your zones and answers for them and nothing else. The **recursor** is
+what clients query: it answers for your zones by asking the authoritative
+server, and forwards or resolves everything else. Forwarding has to live there
+— PowerDNS Authoritative removed its `recursor=` setting in 4.1 and has no way
+to forward at all.
 
 The most important property of this design: **the panel never writes DNS data
 itself.** Every zone and record change is a call to the PowerDNS HTTP API, which
@@ -126,6 +141,117 @@ name to confirm. Only operators and admins can do it.
 - **Send NOTIFY** tells the secondaries that a master zone changed.
 - **Retrieve from master** asks PowerDNS to transfer a slave zone now, rather
   than waiting for the refresh timer.
+
+## Forwarding
+
+Under **Forwarding**, for operators and administrators.
+
+### Global forwarders
+
+Where anything with no more specific rule goes. Set them to your upstream
+resolvers to make this a forwarding resolver for the whole network; leave them
+empty and the recursor walks down from the root servers itself.
+
+Global forwarders always ask the upstream to recurse, because most public
+resolvers refuse a query that does not set that bit.
+
+### Forward zones
+
+One namespace sent somewhere specific:
+
+| Zone | Forward to | Use |
+| --- | --- | --- |
+| `corp.internal` | `10.0.0.5` | An internal domain another server owns |
+| `10.in-addr.arpa` | `10.0.0.5` | Reverse lookups for a private range |
+| `ad.example.com` | `10.0.0.5, 10.0.0.6` | Active Directory, two controllers |
+
+A forward zone covers everything under it, so `corp.internal` also covers
+`host.corp.internal`. The most specific match wins, and a zone this stack is
+authoritative for always wins over both.
+
+Forwarders must be **IP addresses**, not host names — a resolver reads them from
+its configuration before it can resolve anything, so a name here would produce a
+zone that silently never answers. The form rejects one with that explanation
+rather than saving something broken. Add `:port` for anything other than 53, and
+write IPv6 with a port as `[2001:db8::1]:5353`.
+
+Leave *Ask the forwarder to recurse* **off** when the target is authoritative
+for the zone, such as a domain controller. Turn it **on** when the target is
+itself a resolver.
+
+### Your own zones keep working
+
+Because the recursor is the front door, a zone this stack hosts would otherwise
+be looked up on the public internet. The panel maintains one forward rule per
+authoritative zone pointing at the authoritative server, shown with a **local
+zone** badge. Creating or deleting a zone updates them, opening this page
+reconciles them, and *Re-check local zone forwarding* does it on demand.
+
+A rule you made yourself is never touched by that reconciliation, even when it
+covers a zone of the same name: only rules pointing at the authoritative server
+count as the panel's.
+
+### Changes take effect immediately
+
+A resolver does not re-evaluate what it already has cached, and that cache
+includes failures. Saving a forward zone therefore also flushes everything
+cached under that name — otherwise a query made moments before the change
+would keep being answered from the old data, or from a cached `SERVFAIL`, for
+as long as the entry lives. Global forwarders flush the whole tree, because
+changing where *everything* goes invalidates everything.
+
+If the flush itself fails, the change still stands: the forwarding is correct
+and only the rollout is slow. The panel logs a warning saying so.
+
+If you changed the forwarding another way — through the recursor's API
+directly, or by editing its configuration — nothing flushed the cache for you.
+Clear it by hand:
+
+```bash
+docker compose exec recursor rec_control wipe-cache 'corp.internal$'
+```
+
+The `$` makes it wipe the subtree rather than the exact name only.
+
+### Which half answered?
+
+When a name resolves wrongly, ask each server separately. Publish the
+authoritative server with `AUTH_DNS_PORT=5300`, then:
+
+```bash
+dig @127.0.0.1 -p 5300 www.example.com    # the authoritative server alone
+dig @127.0.0.1 www.example.com            # through the recursor, as clients see it
+```
+
+An answer from the first and not the second means the forward rule is missing —
+open Forwarding, which reconciles them.
+
+### DNSSEC and forwarding
+
+The resolver ships with validation off (`process-no-validate`), and that is
+deliberate.
+
+A forwarded zone is answered by a server outside the public DNS chain, so it
+cannot be validated against that chain. A validating resolver asks the root
+whether `corp.internal` is signed, is told the name does not exist there, and
+returns SERVFAIL — for an answer that is perfectly correct. It applies to your
+own zones too, since each one is forwarded to the authoritative server, so
+validating would break exactly the names this server exists to answer. `dig`
+sets the DNSSEC OK bit by default, so you would see it immediately.
+
+DNSSEC records are still passed to clients that ask for them, so a validating
+resolver downstream can still check for itself.
+
+If you want validation here, set `RECURSOR_DNSSEC=process` and list every
+internal zone — forward zones and your own authoritative zones — in
+`RECURSOR_NEGATIVE_TRUSTANCHORS`. Anything you miss returns SERVFAIL.
+
+### Not an open resolver
+
+`RECURSOR_ALLOW_FROM` defaults to private networks and loopback. A recursor
+reachable from the internet gets found within days and used to amplify
+denial-of-service attacks against other people, so widen it only to networks you
+control.
 
 ## DNSSEC
 

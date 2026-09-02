@@ -275,7 +275,7 @@ class TestProvisioningIsAudited:
             )
             entries = self._entries("user.role_change")
             assert len(entries) == 1
-            assert entries[0].detail == "user -> admin"
+            assert entries[0].detail == "user -> admin (from group mapping)"
             assert entries[0].target == "mover"
 
     def test_the_audit_entry_commits_with_the_user(self, app):

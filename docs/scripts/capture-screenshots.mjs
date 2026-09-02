@@ -197,6 +197,25 @@ await page.getByRole('button', { name: 'Save provider' }).click()
 await page.waitForLoadState('networkidle')
 await assertNoError(page, 'creating the OAuth provider')
 
+// Seed forwarding, so the page has something on it: an internal domain, its
+// reverse zone, and upstream resolvers as the global forwarders.
+for (const [zone, servers] of [
+  ['corp.internal', '10.0.0.5\n10.0.0.6'],
+  ['10.in-addr.arpa', '10.0.0.5'],
+]) {
+  await page.goto(`${BASE}/forwarding/new`)
+  await page.locator('#name').fill(zone)
+  await page.locator('#servers').fill(servers)
+  await page.getByRole('button', { name: 'Create forward zone' }).click()
+  await page.waitForLoadState('networkidle')
+  await assertNoError(page, `creating the forward zone ${zone}`)
+}
+await page.goto(`${BASE}/forwarding/`)
+await page.locator('#global_servers').fill('1.1.1.1\n9.9.9.9')
+await page.getByRole('button', { name: 'Save global forwarders' }).click()
+await page.waitForLoadState('networkidle')
+await assertNoError(page, 'setting the global forwarders')
+
 // Sign the flagship zone, so the DNSSEC page has keys and DS records on it.
 await page.goto(`${BASE}/zones/example.com./dnssec`)
 const enable = page.locator('form input[value=enable]')
@@ -228,6 +247,9 @@ await shot(page, 'record-editor')
 
 await page.goto(`${BASE}/zones/example.com./dnssec`)
 await shot(page, 'dnssec', { fullPage: true })
+
+await page.goto(`${BASE}/forwarding/`)
+await shot(page, 'forwarding', { fullPage: true })
 
 await page.goto(`${BASE}/admin/users`)
 await shot(page, 'users')

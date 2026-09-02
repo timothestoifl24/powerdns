@@ -40,6 +40,7 @@ create db_superuser_password 40
 create pdns_db_password 40
 create webui_db_password 40
 create pdns_api_key 48
+create recursor_api_key 48
 create webui_secret_key 64
 create webui_admin_password 24
 

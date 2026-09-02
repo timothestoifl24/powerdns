@@ -7,18 +7,26 @@ local accounts, LDAP / Active Directory, OAuth 2.0 / OpenID Connect and SAML 2.0
 **Documentation, with screenshots: <https://powerdns.stoifl.app>**
 
 ```
-┌──────────────┐        HTTP API         ┌──────────────┐
-│    webui     │ ──────────────────────► │     pdns     │  :53 tcp/udp
-│  Flask +     │                         │  PowerDNS    │
-│  Tabler      │                         │  Authoritative│
-└──────┬───────┘                         └──────┬───────┘
-       │  schema: pdnsadmin                     │  schema: public
-       │  (users, grants, audit log)            │  (domains, records, DNSSEC)
-       └────────────────┬───────────────────────┘
-                        ▼
-                 ┌──────────────┐
-                 │      db      │  PostgreSQL 17
-                 └──────────────┘
+                       clients :53 tcp/udp
+                              │
+                              ▼
+┌──────────────┐  HTTP  ┌──────────────┐   forwards local zones
+│    webui     │ ─────► │   recursor   │ ──────────────┐
+│  Flask +     │        │  PowerDNS    │               │
+│  Tabler      │        │  Recursor    │ ──► upstream  │
+└──────┬───────┘        └──────────────┘    forwarders │
+       │                                               ▼
+       │  HTTP API                            ┌──────────────┐
+       └────────────────────────────────────► │     pdns     │
+       │                                      │  PowerDNS    │
+       │  schema: pdnsadmin                   │  Authoritative│
+       │  (users, grants, audit log)          └──────┬───────┘
+       │                                             │ schema: public
+       └───────────────────┬─────────────────────────┘ (domains, records)
+                           ▼
+                    ┌──────────────┐
+                    │      db      │  PostgreSQL 17
+                    └──────────────┘
 ```
 
 The panel never writes DNS data itself. Every zone and record change goes
@@ -26,6 +34,12 @@ through the PowerDNS HTTP API, so serial bumping, DNSSEC signing and record
 validation stay where they belong. The two halves of the database are separated
 by schema *and* by role: the panel's PostgreSQL user has no rights on the
 PowerDNS tables.
+
+The recursor is the front door on port 53. It answers for the zones this stack
+hosts by forwarding them to the authoritative server, and sends everything else
+to whatever the **Forwarding** page says. Forwarding has to live there because
+the Authoritative Server cannot do it: `recursor=` was removed in PowerDNS
+Authoritative 4.1.
 
 ## Quick start
 
@@ -57,6 +71,7 @@ has it — see [Troubleshooting](#troubleshooting).
 | `secrets/pdns_db_password` | PostgreSQL password for the PowerDNS role |
 | `secrets/webui_db_password` | PostgreSQL password for the panel's role |
 | `secrets/pdns_api_key` | Shared secret for the PowerDNS HTTP API |
+| `secrets/recursor_api_key` | Shared secret for the Recursor HTTP API |
 | `secrets/webui_secret_key` | Flask session signing key |
 | `secrets/webui_admin_password` | Password for the first-run administrator |
 | `.env` | Non-secret settings, copied from `.env.example` |
@@ -69,7 +84,7 @@ plain environment variable instead of a file — each one accepts both `FOO` and
 
 ```
 .
-├── compose.yml               the three services, wired together
+├── compose.yml               the four services, wired together
 ├── .env.example              every setting, documented
 ├── db/
 │   ├── Dockerfile            postgres:17-alpine
@@ -81,10 +96,14 @@ plain environment variable instead of a file — each one accepts both `FOO` and
 │   ├── Dockerfile            Debian trixie + pdns-server + pdns-backend-pgsql
 │   ├── entrypoint.sh         renders pdns.conf, waits for the database
 │   └── pdns.conf.template
+├── recursor/
+│   ├── Dockerfile            Debian trixie + pdns-recursor
+│   ├── entrypoint.sh         renders recursor.yml
+│   └── recursor.yml.template
 ├── webui/
 │   ├── Dockerfile            Tabler vendored at build time, then the Flask app
 │   ├── app/                  the panel
-│   └── tests/                246 tests, incl. an in-memory PowerDNS
+│   └── tests/                403 tests, incl. an in-memory PowerDNS and recursor
 ├── scripts/generate-secrets.sh
 └── docs/                     the documentation site (VitePress)
 ```
@@ -223,7 +242,7 @@ The first time someone signs in through LDAP, OAuth or SAML, an account is
 created for them. Their name, e-mail and role are refreshed from the provider
 on **every** sign-in, so a group change takes effect immediately.
 
-Two rules are worth knowing:
+Three rules are worth knowing:
 
 - Returning users are matched on the provider's stable subject identifier, not
   on their username, so a rename at the identity provider does not create a
@@ -231,10 +250,140 @@ Two rules are worth knowing:
 - Single sign-on will **not** adopt an existing local account with the same
   name. Otherwise anyone who could create a matching username at the identity
   provider could take over the local administrator.
+- Setting an external user's role by hand **pins** it. The group mapping then
+  leaves that account alone, and the user list shows a padlock next to the
+  role. Hand it back with *Hand the role back to the group mapping* on their
+  page. Admission is still decided by the mapping either way: pinning a role
+  is not a way to keep access after being removed from every group that grants
+  it.
+
+### Why is someone not getting the role their group should grant?
+
+Open their entry under **Administration → Users**. The groups the directory
+actually sent at their last sign-in are listed there, which is what the mapping
+is compared against. A group matches by its full DN or by its first component,
+ignoring case, so `CN=DNS-Admins,OU=Groups,DC=example,DC=com` matches a
+configured `DNS-Admins`.
+
+An empty list means the directory sent no groups at all. The usual causes:
+
+- **The wrong group attribute.** Lookups are case-insensitive and fall back to
+  the attributes directories actually publish, so this is rarer than it was,
+  but a directory that publishes membership only on the group object needs a
+  **group search base** instead.
+- **Nested Active Directory groups.** `memberOf` reports only direct
+  membership, so a user in a group that is itself a member of the mapped group
+  is invisible. Set a group search base and this group filter:
+
+  ```
+  (member:1.2.840.113556.1.4.1941:={dn})
+  ```
 
 Set `*_DEFAULT_ROLE=none` to refuse anyone who is not in a mapped group. If no
 group mapping is configured at all, everyone who authenticates gets
 `*_DEFAULT_ROLE` (which defaults to `user`).
+
+## Forwarding
+
+**Administration is under *Forwarding*, for operators and administrators.**
+
+The authoritative server answers only for zones it holds. Anything else — an
+internal Active Directory domain, a reverse zone that belongs to another team,
+or the public internet — has to be forwarded, and forwarding is a Recursor
+feature. PowerDNS Authoritative dropped its `recursor=` setting in 4.1, so the
+stack runs a recursor alongside it and the panel drives that recursor's API.
+
+**Global forwarders** decide where anything with no more specific rule goes.
+Set them to your upstream resolvers to make this a forwarding resolver; leave
+them empty and it walks down from the root servers itself.
+
+**Forward zones** send one namespace somewhere specific:
+
+| Zone | Forward to | Use |
+| --- | --- | --- |
+| `corp.internal` | `10.0.0.5` | An internal domain another server owns |
+| `10.in-addr.arpa` | `10.0.0.5` | Reverse lookups for a private range |
+| `ad.example.com` | `10.0.0.5, 10.0.0.6` | Active Directory, two controllers |
+
+Forwarders must be **IP addresses**, not host names: a resolver reads them from
+its configuration before it is able to resolve anything. Add `:port` for
+anything other than 53, and write IPv6 with a port as `[2001:db8::1]:5353`.
+
+Leave *Ask the forwarder to recurse* off when the target is authoritative for
+the zone, such as a domain controller. Turn it on when the target is itself a
+resolver — most public resolvers refuse a query that does not set that bit,
+which is why global forwarders always set it.
+
+### Your own zones keep working
+
+The recursor is what clients query, so a zone this stack hosts would otherwise
+be looked up on the public internet. The panel keeps one forward rule per
+authoritative zone pointing at the authoritative server, marked **local zone**
+on the page. They are maintained automatically — creating or deleting a zone
+updates them, opening the Forwarding page reconciles them, and there is a
+button to re-check on demand.
+
+A rule you created yourself is never touched by that reconciliation, even if it
+covers a zone of the same name. Only rules pointing at the authoritative server
+are treated as the panel's.
+
+### DNSSEC and forwarding
+
+`RECURSOR_DNSSEC` defaults to `process-no-validate`, which is a deliberate
+choice rather than a shortcut.
+
+A zone you forward is answered by a server outside the public DNS chain, so it
+cannot be validated against that chain: the resolver asks the root whether the
+name is signed, is told it does not exist there, and returns SERVFAIL for an
+answer that is perfectly correct. This is not an edge case — every deployment
+forwards at least one such zone, because each zone this stack is authoritative
+for is forwarded to the authoritative server. Validating here would mean
+SERVFAIL for **your own zones** to any client that sets the DNSSEC OK bit,
+which today is most of them, `dig` included.
+
+DNSSEC records are still served to clients that ask for them, so a validating
+resolver downstream can check for itself.
+
+To validate here instead, turn it on and name every internal zone as a
+negative trust anchor — every forward zone, and every zone this server is
+authoritative for:
+
+```bash
+RECURSOR_DNSSEC=process
+RECURSOR_NEGATIVE_TRUSTANCHORS=corp.internal,10.in-addr.arpa,example.com
+```
+
+Miss one and it returns SERVFAIL, so this is worth doing only if you need
+validation of public names at this resolver rather than at the client.
+
+### Not an open resolver
+
+`RECURSOR_ALLOW_FROM` defaults to private networks and loopback only. A
+recursor reachable from the internet will be found within days and used to
+amplify denial-of-service attacks against other people, so widen this only to
+networks you control. The CI smoke test fails the build if the running
+configuration allows `0.0.0.0/0`.
+
+### Querying the authoritative server directly
+
+Useful when a zone answers wrongly and you want to know which half is at fault.
+It is not published by default:
+
+```bash
+AUTH_DNS_BIND_ADDRESS=127.0.0.1
+AUTH_DNS_PORT=5300
+```
+
+```bash
+dig @127.0.0.1 -p 5300 www.example.com   # the authoritative server alone
+dig @127.0.0.1 www.example.com           # through the recursor, as clients see it
+```
+
+### Running without the recursor
+
+Remove the `recursor` service and unset `RECURSOR_API_URL`. The Forwarding page
+then explains that it is unavailable rather than failing, and the nav entry is
+hidden. Publish the authoritative server on `DNS_PORT` again if you do this.
 
 ## Running behind a reverse proxy
 
@@ -414,7 +563,32 @@ dig @127.0.0.1 -p 5353 example.com SOA
 
 or free port 53 by disabling the stub listener (`DNSStubListener=no` in
 `/etc/systemd/resolved.conf`, then `systemctl restart systemd-resolved`). The
-container always serves on 53 internally; `DNS_PORT` only affects the host side.
+container always serves on 53 internally; `DNS_PORT` only affects the host
+side. `DNS_PORT` is the recursor, which is the front door; the authoritative
+server has its own `AUTH_DNS_PORT` and is unpublished by default.
+
+**A zone resolves on the authoritative server but not through the recursor.**
+The recursor needs a forward rule pointing at the authoritative server for each
+zone this stack hosts. Compare the two:
+
+```bash
+dig @127.0.0.1 -p 5300 www.example.com    # needs AUTH_DNS_PORT published
+dig @127.0.0.1 www.example.com
+```
+
+If the first answers and the second does not, open **Forwarding** — that
+reconciles the rules — or press *Re-check local zone forwarding*. The zone
+should be listed with a **local zone** badge.
+
+**Forward zones disappeared after `docker compose down`.** They live in the
+`recursor-api` volume. `down -v` removes it along with the database. Without
+`-v` they survive.
+
+**`Zone already exists` when adding a forward zone for a private reverse zone.**
+The recursor serves the RFC 1918 reverse zones itself, so it already knows
+names like `168.192.in-addr.arpa`. The panel replaces them rather than failing,
+so saving again from the Forwarding page works; the error only appears if you
+POST to the recursor's API by hand.
 
 **Login appears to succeed but bounces straight back to the sign-in page.**
 `SESSION_COOKIE_SECURE=true` over plain HTTP: the browser never sends the

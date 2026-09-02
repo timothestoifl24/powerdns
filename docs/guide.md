@@ -279,7 +279,7 @@ with scrypt, and everyone can change their own under **My profile**.
 Accounts that come from LDAP, OAuth or SAML are created on first sign-in — from
 a provider configured either [in the UI](#sign-in-providers) or in `.env` — and
 their name, e-mail and role are refreshed from the provider on *every* sign-in,
-so a group change takes effect the next time the person logs in. Two rules are
+so a group change takes effect the next time the person logs in. Three rules are
 worth knowing:
 
 - Returning users are matched on the provider's stable subject identifier, not on
@@ -288,6 +288,37 @@ worth knowing:
 - Single sign-on will **not** adopt an existing local account with the same name.
   Otherwise anyone able to create a matching username at the identity provider
   could take over the local administrator.
+- Choosing an external user's role by hand **pins** it, and the group mapping
+  stops overwriting it. See below.
+
+### Pinning a role by hand
+
+Directory groups are the normal way to decide who gets which role, but sometimes
+one person needs a role their groups do not grant and changing the directory is
+not worth it. Set their role under **Administration → Users → *(a user)*** and
+the panel stops recomputing it: the choice survives every later sign-in, and a
+padlock appears beside their role in the user list. Tick **Hand the role back to
+the group mapping** on the same page to undo it, and the next sign-in resumes
+following the groups.
+
+Pinning decides the *role*, never admission. Whether an account may sign in at
+all is still the group mapping's call, so a pinned administrator who is removed
+from every mapped group — with `*_DEFAULT_ROLE=none` set — is refused like
+anyone else. That is deliberate: revoking someone in the directory has to be
+enough to lock them out.
+
+### Which groups did the directory actually send?
+
+Each user's page lists the groups their provider reported at their last sign-in.
+That list, not what you believe the directory holds, is what the role mapping is
+compared against — so it is the first thing to read when someone in your admin
+group is not getting the admin role. Matching is case-insensitive and accepts
+either the full DN or its first component, so a configured `DNS-Admins` matches
+`CN=DNS-Admins,OU=Groups,DC=example,DC=com`.
+
+An empty list means the directory sent no groups at all, which is a lookup
+problem rather than a mapping one; [the LDAP
+notes](/advanced-config#finding-a-user-s-groups) cover the causes.
 
 ## The audit log
 

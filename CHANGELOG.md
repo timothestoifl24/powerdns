@@ -1,0 +1,107 @@
+# Changelog
+
+Notable changes to this stack, newest first. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
+[semantic versioning](https://semver.org/spec/v2.0.0.html).
+
+Each released version is also a
+[GitHub release](https://github.com/timothestoifl24/powerdns/releases), where
+the entry below is followed by the full list of merged pull requests, generated
+from their labels. Upgrade instructions live in
+[docs/upgrading.md](docs/upgrading.md).
+
+## [Unreleased]
+
+Nothing yet.
+
+## [1.0.1] — 2026-09-02
+
+The stack as it now stands. v1.0.0 tagged a much earlier codebase, and
+everything below has landed since; if you are coming from it, read
+[upgrading](https://powerdns.stoifl.app/upgrading) rather than pulling.
+
+### Added
+
+- **The stack itself.** PostgreSQL 17, PowerDNS Authoritative 4.9 on the
+  `gpgsql` backend, PowerDNS Recursor 5.2 and a Flask admin panel, started by
+  one `compose.yml`. The schema is loaded on first start and start-up order is
+  enforced by health checks rather than by timing.
+- **An admin panel** on the Tabler theme: zones, record sets, DNSSEC, an audit
+  log, per-user zone grants, and three roles (`admin`, `operator`, `user`). It
+  never writes DNS data itself — every change is a call to the PowerDNS HTTP
+  API, so PowerDNS keeps ownership of SOA serials, signing and record
+  validation.
+- **Forward zones and global forwarders**, on the bundled recursor and managed
+  from the panel's **Forwarding** page. Global forwarders catch everything with
+  no more specific rule; a forward zone sends one namespace to servers you
+  name. The zones this stack is authoritative for are forwarded to the
+  authoritative server automatically, and reconciled whenever the page is
+  opened. Forwarding lives in the recursor because PowerDNS Authoritative
+  removed its `recursor=` setting in 4.1 and cannot forward at all.
+- **Sign-in with LDAP/Active Directory, OAuth 2.0/OpenID Connect and SAML 2.0**,
+  with group-to-role mapping for each. Providers can be added, tested and
+  disabled from **Administration → Sign-in providers** at runtime, with no
+  restart; their client secrets are encrypted at rest with `SECRET_KEY`.
+- **A role can be pinned by hand.** Choosing an external user's role stops the
+  group mapping from recomputing it, and a padlock marks it in the user list.
+  Admission is still the mapping's decision, so pinning is not a way to keep
+  access after losing every mapped group.
+- **The groups a directory reported** at a user's last sign-in are recorded and
+  shown on their page — the list the role mapping is actually compared against,
+  which is what makes a mapping that does not match diagnosable.
+- **A documentation site** at [powerdns.stoifl.app](https://powerdns.stoifl.app),
+  built with VitePress from `docs/`.
+- **A security policy** (`.github/SECURITY.md`) and Dependabot updates across
+  all four dependency surfaces.
+
+### Fixed
+
+- **A manually assigned role no longer reverts on the next sign-in.** External
+  accounts had their role recomputed from the group mapping every time, so an
+  administrator appointed by hand was demoted the moment they logged in again.
+- **LDAP group membership is found the way directories actually publish it.**
+  Attribute names are matched without regard to case; when the configured
+  attribute comes back empty the panel tries `memberOf`, `isMemberOf`, `nsRole`
+  and `groupMembership`; and setting a group search base runs a search against
+  the group objects for directories that record membership only there. A
+  sign-in that finds no groups at all now logs a warning naming what was tried,
+  instead of silently handing out the default role. This is why an account in
+  the mapped admin group could sign in as a plain user.
+- **Forwarded zones are no longer DNSSEC-validated.** A zone answered outside
+  the public chain has no signature to find, so a validating resolver returned
+  SERVFAIL for a perfectly correct answer — including for every zone this stack
+  hosts, since each one is forwarded to the authoritative server. Validation
+  defaults to `process-no-validate`; turn it on with `RECURSOR_DNSSEC` and list
+  your internal zones in `RECURSOR_NEGATIVE_TRUSTANCHORS`.
+- **Saving or deleting a forward zone flushes the resolver's cache** for that
+  name and everything under it, so a changed rule takes effect immediately
+  rather than after the old answer's TTL.
+- **The recursor is configured in YAML.** Recursor 5.2 no longer reads the
+  classic `key=value` settings file unless explicitly asked to, and a config it
+  cannot parse stops the container.
+
+### Security
+
+- **Neither application role is a superuser.** PowerDNS and the panel each own
+  one schema and are denied the other's tables; a separate bootstrap role does
+  the privileged setup. CI proves the isolation rather than assuming it.
+- **Secrets are files, not environment variables**, generated by
+  `scripts/generate-secrets.sh` and never committed.
+- **The recursor is not an open resolver.** `RECURSOR_ALLOW_FROM` defaults to
+  loopback and the private ranges, and CI fails the build if that default ever
+  widens to `0.0.0.0/0`.
+- CSRF protection on every state-changing form, scrypt password hashing, and an
+  audit log that records failed attempts as well as successful ones.
+- `TRUSTED_PROXY_COUNT` defaults to `0`, so `X-Forwarded-For` is ignored until
+  you state how many proxies you actually run.
+
+### Changed
+
+- **Port 53 is the recursor.** The authoritative server moved behind it and is
+  no longer published on `DNS_PORT`; publish it separately with
+  `AUTH_DNS_PORT` if you want to query it directly.
+- The panel's `users` table gained `role_locked` and `last_groups`. They are
+  added on start-up, so no manual migration is needed.
+
+[Unreleased]: https://github.com/timothestoifl24/powerdns/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/timothestoifl24/powerdns/compare/v1.0.0...v1.0.1

@@ -1,10 +1,13 @@
 # Dependabot version updates.
 #
 # This repository is a good fit for automated updates because CI can actually
-# tell whether a bump broke anything: 246 unit tests, ruff, shellcheck, and a
-# compose smoke test that builds all three images, resolves a record with dig
-# and exercises the login flow. An update that breaks the stack fails the PR
-# rather than reaching a deployment.
+# tell whether a bump broke anything: the unit suite, ruff, shellcheck, and a
+# compose smoke test that builds all four images, resolves a record with dig
+# through both DNS servers, and exercises the login and forwarding flows. An
+# update that breaks the stack fails the PR rather than reaching a deployment.
+#
+# The `dependencies` label below is also what puts these pull requests in their
+# own section of the generated release notes; see .github/release.yml.
 #
 # Cooldown periods keep Dependabot off releases that are only hours old, which
 # is where most regressions get caught by other people first. Cooldown applies

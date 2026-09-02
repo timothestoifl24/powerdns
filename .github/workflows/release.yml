@@ -1,0 +1,307 @@
+name: Release
+
+# Cutting a release is one push:
+#
+#   git tag -a v1.2.3 -m 'v1.2.3' && git push origin v1.2.3
+#
+# This workflow then publishes version-tagged images and creates the GitHub
+# release. The notes are assembled rather than typed: the hand-written section
+# for that version in CHANGELOG.md leads, and underneath it GitHub's own
+# generate-notes API lists every pull request merged since the previous tag,
+# sorted into the categories in .github/release.yml.
+#
+# CI does not run on tags -- it runs on the branch push that produced the
+# commit -- so the first job checks that the tagged commit really is on main
+# and that its checks passed, rather than trusting the tag.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re)build the release for, e.g. v1.0.1'
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  verify:
+    name: Verify the tag
+    runs-on: ubuntu-latest
+    # A job-level block replaces the workflow-level one outright, so
+    # `contents: read` has to be repeated here. `checks: read` is what lets the
+    # step below read the CI conclusions back; without it the API answers 403
+    # and the job fails for a reason that has nothing to do with the release.
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+      sha: ${{ steps.tag.outputs.sha }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The whole history, so the ancestry check below can actually see
+          # whether the tagged commit is on main.
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - id: tag
+        name: Read the tag
+        env:
+          RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          tag="$RAW_TAG"
+          version="${tag#v}"
+
+          # Semantic versioning, optionally with a prerelease suffix. A typo
+          # here would otherwise be published as a real release.
+          if ! printf '%s' "$version" \
+               | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$tag' is not a vMAJOR.MINOR.PATCH tag"
+            exit 1
+          fi
+
+          case "$version" in
+            *-*) prerelease=true ;;
+            *)   prerelease=false ;;
+          esac
+
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "sha=$(git rev-parse HEAD)"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+          echo "releasing $tag (version $version, prerelease $prerelease)"
+
+      - name: The tagged commit is on main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if git merge-base --is-ancestor HEAD origin/main; then
+            echo "the tag is an ancestor of main"
+          else
+            echo "::error::${{ steps.tag.outputs.tag }} points at a commit that is not on main"
+            exit 1
+          fi
+
+      - name: CI passed on the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.tag.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # The tag itself is never tested -- CI runs on the branch push. Read
+          # back what that run concluded rather than assuming it was green.
+          # Only CI's three gate jobs; the code scanning checks are a separate
+          # signal and are not what decides whether the code works.
+          # `filter=latest` keeps re-runs from resurrecting an old conclusion.
+          conclusions=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs?per_page=100&filter=latest" \
+            --jq '.check_runs[] | select(.name | test("Unit tests|Shell scripts|End-to-end")) | "\(.name)=\(.conclusion)"')
+
+          if [ -z "$conclusions" ]; then
+            echo "::error::no CI results found for $SHA -- has it been pushed to main?"
+            exit 1
+          fi
+          echo "$conclusions"
+
+          # A real failure blocks the release. A run that was cancelled or
+          # skipped -- which happens whenever a later push to main supersedes
+          # an earlier one -- is reported but does not, because it is an
+          # absence of evidence rather than evidence of a break.
+          if printf '%s\n' "$conclusions" | grep -Eq '=(failure|timed_out|action_required)$'; then
+            echo "::error::CI failed on the commit being released"
+            exit 1
+          fi
+          if printf '%s\n' "$conclusions" | grep -vq '=success$'; then
+            echo "::warning::not every CI job on this commit concluded successfully; see the list above"
+          fi
+
+      - name: CHANGELOG.md has an entry for this version
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          # A warning rather than a failure: a missing entry should be visible
+          # in the run summary, but it must not be able to strand a tag that is
+          # already pushed and immutable. The release still gets the generated
+          # pull request list.
+          if grep -Eq "^## \[?${VERSION}\]?" CHANGELOG.md; then
+            echo "found the CHANGELOG entry for $VERSION"
+          else
+            echo "::warning::CHANGELOG.md has no '## [$VERSION]' section; the release will carry only the generated notes"
+          fi
+
+  images:
+    name: Publish ${{ matrix.image }}
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      # One image failing should not leave the other three unpublished and the
+      # run half-done; let them all finish and fix whichever broke.
+      fail-fast: false
+      matrix:
+        include:
+          - context: ./pdns
+            image: pdns
+          - context: ./recursor
+            image: pdns-recursor
+          - context: ./db
+            image: pdns-db
+          - context: ./webui
+            image: pdns-webui
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          # `latest` is enabled by default only for a non-prerelease semver
+          # tag, which is what we want: v1.1.0-rc1 must not become latest.
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.verify.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.verify.outputs.tag }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Shares the cache the CI workflow fills, so a release right after a
+          # green main build is mostly cache hits.
+          cache-from: type=gha,scope=${{ matrix.image }}
+
+  release:
+    name: Create the release
+    # After the images, so the notes never point at tags that do not exist yet.
+    needs: [verify, images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+
+      - name: Assemble the notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.verify.outputs.tag }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # The generated half: every pull request merged since the previous
+          # tag, categorised by .github/release.yml. GitHub works out the
+          # previous tag itself.
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="$TAG" \
+            -f target_commitish=main \
+            --jq '.body' > /tmp/generated.md
+          echo "generated notes: $(wc -l < /tmp/generated.md) lines"
+
+          # The hand-written half: this version's section of CHANGELOG.md, up
+          # to the next version heading.
+          python3 - "$VERSION" <<'PY' > /tmp/handwritten.md
+          import pathlib, re, sys
+
+          version = sys.argv[1]
+          # An empty version would turn the pattern below into one that
+          # matches any heading, and the release would quietly carry the
+          # Unreleased section.
+          if not version:
+              raise SystemExit("no version given")
+
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+
+          start = re.search(rf"^## \[?{re.escape(version)}\]?.*$", text, re.MULTILINE)
+          if start:
+              rest = text[start.end():]
+              end = re.search(r"^## ", rest, re.MULTILINE)
+              body = (rest[: end.start()] if end else rest).strip()
+              # Link definitions belong to the file, not to this section.
+              body = re.sub(r"^\[[^\]]+\]:.*$", "", body, flags=re.MULTILINE).strip()
+              print(body)
+          PY
+          echo "changelog section: $(wc -c < /tmp/handwritten.md) bytes"
+
+          {
+            if [ -s /tmp/handwritten.md ]; then
+              cat /tmp/handwritten.md
+              printf '\n\n---\n\n'
+            fi
+            cat /tmp/generated.md
+            printf '\n\n## Images\n\n'
+            printf 'Published to `ghcr.io`, tagged `%s`:\n\n' "$VERSION"
+            for image in pdns pdns-recursor pdns-db pdns-webui; do
+              printf -- '- `ghcr.io/%s/%s:%s`\n' \
+                "${GITHUB_REPOSITORY_OWNER}" "$image" "$VERSION"
+            done
+            printf '\nUpgrade notes: https://powerdns.stoifl.app/upgrading\n'
+          } > /tmp/notes.md
+
+          echo '--- notes ---'
+          cat /tmp/notes.md
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.verify.outputs.tag }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          # An `if`, not `[ … ] && …`: under `set -e` a false test at the head
+          # of an `&&` list aborts the whole step.
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then
+            flags+=(--prerelease)
+          fi
+
+          # Re-runnable: a workflow_dispatch on an existing tag replaces the
+          # notes instead of failing on "release already exists".
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "the release already exists; updating its notes"
+            gh release edit "$TAG" \
+              --title "$TAG" \
+              --notes-file /tmp/notes.md \
+              "${flags[@]}"
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes-file /tmp/notes.md \
+              --verify-tag \
+              "${flags[@]}"
+          fi
+          gh release view "$TAG" --json url --jq '.url'

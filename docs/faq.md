@@ -30,6 +30,33 @@ the outside world will query, 53 is not optional.
 by the browser, so the next request has no session. Set it to `false` for HTTP,
 or put the panel behind TLS.
 
+### An LDAP user in the admin group signs in as a normal user
+
+Open their entry under **Administration → Users**. It lists the groups the
+directory reported at their last sign-in, and that list — not what the directory
+holds — is what the mapping is compared against.
+
+If the group is there, the mapping does not match it. Names are compared without
+regard to case, and both the full DN and its first component count, so
+`LDAP_ADMIN_GROUP=DNS-Admins` matches
+`CN=DNS-Admins,OU=Groups,DC=example,DC=com`. A trailing space or a different
+group of the same name in another OU will not.
+
+If the list is empty the directory sent nothing, which is a lookup problem. The
+common causes are a directory that records membership only on the group object
+(set `LDAP_GROUP_SEARCH_BASE`) and nested Active Directory groups (`memberOf`
+reports only direct membership). [Finding a user's
+groups](/advanced-config#finding-a-user-s-groups) covers both.
+
+### A role I set by hand went back to what the groups say
+
+Roles set by hand are pinned and are not supposed to revert; releases before
+v1.0.1 recomputed them from the group mapping on every sign-in. Upgrade, then
+set the role again — the padlock beside it in the user list means it is pinned.
+
+Note that pinning survives sign-ins but does not grant admission: with
+`*_DEFAULT_ROLE=none`, an account that matches no mapped group is still refused.
+
 ### `Permission denied` reading `/run/secrets/…`, and the database exits
 
 The files under `secrets/` must be world-readable (`0644`). Compose bind-mounts

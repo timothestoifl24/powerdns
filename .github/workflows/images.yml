@@ -1,0 +1,216 @@
+name: Images
+
+# Builds and publishes all four images as multi-architecture manifest lists
+# covering linux/amd64 and linux/arm64.
+#
+# arm64 IS aarch64 -- one architecture with two names. `aarch64` is the ARM
+# ISA's own name, `arm64` is what Docker, the Linux kernel and Apple call it,
+# and OCI has no separate `aarch64` platform. A `linux/arm64` image runs on
+# every aarch64 machine: Graviton, Ampere, Raspberry Pi 4/5 on a 64-bit OS,
+# and Apple silicon under Docker Desktop.
+#
+# Each platform is built on a runner of its own architecture rather than under
+# QEMU. Native is not just faster: emulated dpkg and pip are slow enough to
+# dominate the run, and an emulator that diverges from real hardware is a
+# source of failures that reproduce nowhere else. GitHub's arm64 runners are
+# free for public repositories, so this costs nothing here.
+#
+# The pattern is buildx's own: every leg pushes an untagged image and reports
+# only its digest, then one merge job assembles the digests into the manifest
+# list that carries the real tags. Tags therefore appear in the registry once,
+# already complete -- there is no window in which a tag resolves to a
+# half-published set of architectures.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Commit, branch or tag to build.'
+        required: true
+        type: string
+      tags:
+        description: >-
+          docker/metadata-action tag configuration, one rule per line. The
+          caller owns the tagging policy; this workflow owns the architectures.
+        required: true
+        type: string
+      write_cache:
+        description: >-
+          Populate the shared build cache as well as reading it. True on the
+          branch builds that run often; false for a release, which reads what
+          those already wrote instead of evicting it.
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    name: ${{ matrix.image.name }} (${{ matrix.platform.arch }})
+    runs-on: ${{ matrix.platform.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      # One architecture of one image failing should not cancel the other
+      # seven legs: the whole point is to see whether the failure is confined
+      # to a single platform.
+      fail-fast: false
+      matrix:
+        image:
+          - { name: pdns, context: ./pdns }
+          - { name: pdns-recursor, context: ./recursor }
+          - { name: pdns-db, context: ./db }
+          - { name: pdns-webui, context: ./webui }
+        platform:
+          - { arch: amd64, runner: ubuntu-latest }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Only for the labels: the tags belong on the manifest list the merge
+      # job creates, never on these per-architecture children.
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image.name }}
+
+      - id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.image.context }}
+          platforms: linux/${{ matrix.platform.arch }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # push-by-digest uploads the image with no tag at all and returns
+          # its digest; name-canonical is what makes that digest addressable
+          # as <image>@sha256:... for the merge below.
+          #
+          # Deliberately one long line. buildx parses this as CSV, and a
+          # folded YAML scalar would join the lines with spaces, turning the
+          # second key into " name" and quietly breaking the push.
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
+          # Scoped per architecture: one shared scope would have the two legs
+          # overwrite each other's cache on every run and hit on neither.
+          cache-from: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          cache-to: ${{ inputs.write_cache && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+
+      - name: Record the digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # An empty digest means the build produced nothing to merge, and the
+          # merge job would fail later with a far less obvious message.
+          if [ -z "$DIGEST" ]; then
+            echo "::error::the build reported no digest"
+            exit 1
+          fi
+          mkdir -p /tmp/digests
+          # Named after the digest itself: the merge job only needs the file
+          # names, and this keeps them unique without any bookkeeping.
+          touch "/tmp/digests/${DIGEST#sha256:}"
+          echo "$DIGEST"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Publish ${{ matrix.image }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [pdns, pdns-recursor, pdns-db, pdns-webui]
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          # Both architectures of this image, and nothing from the other three.
+          pattern: digest-${{ matrix.image }}-*
+          merge-multiple: true
+          path: /tmp/digests
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: ${{ inputs.tags }}
+
+      - name: Assemble the manifest list
+        working-directory: /tmp/digests
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+        run: |
+          set -euo pipefail
+
+          # Every architecture must be present. Merging one would publish a
+          # tag that silently works on amd64 and fails to pull on arm64,
+          # which is worse than not publishing at all.
+          count=$(find . -maxdepth 1 -type f | wc -l)
+          echo "digests found: $count"
+          find . -maxdepth 1 -type f -printf '  %f\n'
+          if [ "$count" -ne 2 ]; then
+            echo "::error::expected 2 digests (amd64, arm64), found $count"
+            exit 1
+          fi
+
+          # The word splitting here is the point, not an oversight: each
+          # expansion has to become several separate arguments -- one -t per
+          # tag, one image@sha256:... per architecture. Quoting either would
+          # pass a single argument and the command would fail.
+          # shellcheck disable=SC2046
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf "${IMAGE}@sha256:%s " *)
+
+      - name: The published tags really are multi-architecture
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Read back what the registry now serves rather than trusting the
+          # push. This is the assertion that makes the arm64 claim checkable.
+          docker buildx imagetools inspect "${IMAGE}:${VERSION}" --format '{{json .Manifest}}' \
+            | jq -r '.manifests[]
+                     | select(.platform.os != "unknown")
+                     | "\(.platform.os)/\(.platform.architecture)"' \
+            | sort -u | tee /tmp/platforms.txt
+
+          for want in linux/amd64 linux/arm64; do
+            grep -qx "$want" /tmp/platforms.txt || {
+              echo "::error::${IMAGE}:${VERSION} does not include $want"
+              exit 1
+            }
+          done
+          echo "${IMAGE}:${VERSION} covers amd64 and arm64"

@@ -539,6 +539,26 @@ commit is on `main` and that CI passed on it, publishes all four images tagged
 `1.2.3` and `1.2` (and `latest`, unless the tag is a prerelease like
 `v1.2.3-rc1`), and creates the GitHub release.
 
+### Architectures
+
+Images are published for **`linux/amd64`** and **`linux/arm64`** (aarch64 —
+the same architecture under its other name). Both the branch builds and the
+releases go through `.github/workflows/images.yml`, so the two can never drift
+apart on which platforms they cover.
+
+Each platform is built on a runner of its own architecture rather than under
+QEMU: emulated `dpkg` and `pip` dominate the run time, and an emulator that
+diverges from real hardware produces failures that reproduce nowhere else.
+Every leg pushes an untagged image and reports only its digest; a single merge
+job then assembles those digests into the manifest list that carries the tags,
+so a tag never resolves to a half-published set of architectures. It ends by
+reading the manifest back out of the registry and failing if either platform
+is missing.
+
+The end-to-end compose smoke test runs on both architectures too, so `arm64`
+is a build that has been started, queried over real DNS and signed into —
+not merely one that compiled.
+
 The release notes are assembled rather than typed: the `CHANGELOG.md` section
 for that version leads, and beneath it GitHub lists every pull request merged
 since the previous tag, sorted into the categories in `.github/release.yml`.

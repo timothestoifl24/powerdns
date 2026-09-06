@@ -135,6 +135,29 @@ exact build if you need to. `latest` is fine for a lab and a poor idea in
 production, where an unattended `docker compose pull` should never be able to
 change what you are running.
 
+### Architectures
+
+Every published tag is a manifest list covering **`linux/amd64`** and
+**`linux/arm64`**, so `docker pull` and `docker compose pull` select the right
+build for the machine with nothing to configure. That covers x86-64 servers,
+AWS Graviton, Ampere, a Raspberry Pi 4 or 5 running a 64-bit OS, and Apple
+silicon under Docker Desktop.
+
+`arm64` and `aarch64` are two names for one architecture — `aarch64` is what
+ARM calls the 64-bit ISA and what `uname -m` prints, `arm64` is what Docker and
+the Linux kernel call it. If your machine reports `aarch64`, the `linux/arm64`
+image is the one it will pull. There is no separate `aarch64` image to look for.
+
+Check what a tag actually contains:
+
+```bash
+docker buildx imagetools inspect ghcr.io/timothestoifl24/pdns-webui:1.0.1
+```
+
+32-bit ARM (`armv7`/`armhf`) is not published. Nothing in the stack rules it
+out, but nothing tests it either, and PowerDNS with PostgreSQL is a poor fit
+for the memory those boards have.
+
 What changed between two versions is in the
 [changelog](https://github.com/timothestoifl24/powerdns/blob/main/CHANGELOG.md),
 and each [release](https://github.com/timothestoifl24/powerdns/releases) repeats

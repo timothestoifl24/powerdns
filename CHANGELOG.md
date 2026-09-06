@@ -14,7 +14,7 @@ from their labels. Upgrade instructions live in
 
 Nothing yet.
 
-## [1.0.1] — 2026-09-02
+## [1.0.1] — 2026-09-06
 
 The stack as it now stands. v1.0.0 tagged a much earlier codebase, and
 everything below has landed since; if you are coming from it, read
@@ -22,6 +22,13 @@ everything below has landed since; if you are coming from it, read
 
 ### Added
 
+- **Images are published for `linux/arm64` as well as `linux/amd64`.** Every
+  tag is now a manifest list, so `docker pull` picks the right build by itself
+  on Graviton, Ampere, a 64-bit Raspberry Pi or Apple silicon. `arm64` and
+  `aarch64` are the same architecture, so there is no third image to look for.
+  Each platform is built natively rather than under QEMU, and the end-to-end
+  compose smoke test now runs on both, so the ARM images are exercised over
+  real DNS rather than only compiled.
 - **The stack itself.** PostgreSQL 17, PowerDNS Authoritative 4.9 on the
   `gpgsql` backend, PowerDNS Recursor 5.2 and a Flask admin panel, started by
   one `compose.yml`. The schema is loaded on first start and start-up order is

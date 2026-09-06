@@ -12,7 +12,15 @@ from their labels. Upgrade instructions live in
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Images are published for `linux/arm64` as well as `linux/amd64`.** Every
+  tag is now a manifest list, so `docker pull` picks the right build by itself
+  on Graviton, Ampere, a 64-bit Raspberry Pi or Apple silicon. `arm64` and
+  `aarch64` are the same architecture, so there is no third image to look for.
+  Each platform is built natively rather than under QEMU, and the end-to-end
+  compose smoke test now runs on both, so the ARM images are exercised over
+  real DNS rather than only compiled.
 
 ## [1.0.1] — 2026-09-02
 

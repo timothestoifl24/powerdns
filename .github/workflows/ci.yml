@@ -19,9 +19,6 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  REGISTRY: ghcr.io
-
 jobs:
   test:
     name: Unit tests
@@ -77,8 +74,18 @@ jobs:
           shellcheck "${scripts[@]}"
 
   smoke:
-    name: End-to-end compose smoke test
-    runs-on: ubuntu-latest
+    name: End-to-end compose smoke test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # Run both architectures to completion. When one fails and the other
+      # passes, that difference is the finding.
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     env:
       # Layers compose.ci.yml on top, so every `docker compose` call below
       # still runs the real compose.yml.
@@ -601,48 +608,20 @@ jobs:
 
   publish:
     name: Build and push images
-    runs-on: ubuntu-latest
     needs: [test, shellcheck, smoke]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
     permissions:
       contents: read
       packages: write
-    strategy:
-      matrix:
-        include:
-          - context: ./pdns
-            image: pdns
-          - context: ./recursor
-            image: pdns-recursor
-          - context: ./db
-            image: pdns-db
-          - context: ./webui
-            image: pdns-webui
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: docker/setup-buildx-action@v4
-
-      - uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
-          tags: |
-            type=ref,event=branch
-            type=sha,format=short
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-
-      - uses: docker/build-push-action@v7
-        with:
-          context: ${{ matrix.context }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+    # The architectures live in one place, shared with the release workflow,
+    # so a branch build and a release can never cover different platforms.
+    uses: ./.github/workflows/images.yml
+    with:
+      ref: ${{ github.sha }}
+      tags: |
+        type=ref,event=branch
+        type=sha,format=short
+        type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+      # The branch builds run often and are what fill the cache the release
+      # then reads.
+      write_cache: true

@@ -32,9 +32,6 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  REGISTRY: ghcr.io
-
 jobs:
   verify:
     name: Verify the tag
@@ -160,58 +157,25 @@ jobs:
           fi
 
   images:
-    name: Publish ${{ matrix.image }}
+    name: Publish images
     needs: verify
-    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-    strategy:
-      # One image failing should not leave the other three unpublished and the
-      # run half-done; let them all finish and fix whichever broke.
-      fail-fast: false
-      matrix:
-        include:
-          - context: ./pdns
-            image: pdns
-          - context: ./recursor
-            image: pdns-recursor
-          - context: ./db
-            image: pdns-db
-          - context: ./webui
-            image: pdns-webui
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.verify.outputs.sha }}
-
-      - uses: docker/setup-buildx-action@v4
-
-      - uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
-          # `latest` is enabled by default only for a non-prerelease semver
-          # tag, which is what we want: v1.1.0-rc1 must not become latest.
-          tags: |
-            type=semver,pattern={{version}},value=${{ needs.verify.outputs.tag }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.verify.outputs.tag }}
-
-      - uses: docker/build-push-action@v7
-        with:
-          context: ${{ matrix.context }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # Shares the cache the CI workflow fills, so a release right after a
-          # green main build is mostly cache hits.
-          cache-from: type=gha,scope=${{ matrix.image }}
+    # Same reusable workflow the branch builds use, so a released tag covers
+    # exactly the architectures CI has been building and smoke-testing all
+    # along -- amd64 and arm64 (aarch64).
+    uses: ./.github/workflows/images.yml
+    with:
+      ref: ${{ needs.verify.outputs.sha }}
+      # `latest` is enabled by default only for a non-prerelease semver tag,
+      # which is what we want: v1.1.0-rc1 must not become latest.
+      tags: |
+        type=semver,pattern={{version}},value=${{ needs.verify.outputs.tag }}
+        type=semver,pattern={{major}}.{{minor}},value=${{ needs.verify.outputs.tag }}
+      # Reads the cache the main-branch builds filled; a release should not
+      # evict it, so it does not write back.
+      write_cache: false
 
   release:
     name: Create the release

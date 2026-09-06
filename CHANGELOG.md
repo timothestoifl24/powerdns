@@ -12,6 +12,14 @@ from their labels. Upgrade instructions live in
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.0.1] — 2026-09-06
+
+The stack as it now stands. v1.0.0 tagged a much earlier codebase, and
+everything below has landed since; if you are coming from it, read
+[upgrading](https://powerdns.stoifl.app/upgrading) rather than pulling.
+
 ### Added
 
 - **Images are published for `linux/arm64` as well as `linux/amd64`.** Every
@@ -21,15 +29,6 @@ from their labels. Upgrade instructions live in
   Each platform is built natively rather than under QEMU, and the end-to-end
   compose smoke test now runs on both, so the ARM images are exercised over
   real DNS rather than only compiled.
-
-## [1.0.1] — 2026-09-02
-
-The stack as it now stands. v1.0.0 tagged a much earlier codebase, and
-everything below has landed since; if you are coming from it, read
-[upgrading](https://powerdns.stoifl.app/upgrading) rather than pulling.
-
-### Added
-
 - **The stack itself.** PostgreSQL 17, PowerDNS Authoritative 4.9 on the
   `gpgsql` backend, PowerDNS Recursor 5.2 and a Flask admin panel, started by
   one `compose.yml`. The schema is loaded on first start and start-up order is

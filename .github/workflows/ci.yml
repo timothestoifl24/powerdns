@@ -203,15 +203,31 @@ jobs:
       - name: The web UI answers and serves the Tabler theme
         run: |
           set -euo pipefail
-          curl -fsS http://localhost:9191/healthz | tee /dev/stderr | grep -q '"status": *"ok"'
+          # Fetched to a file and then matched, never `curl ... | grep -q`.
+          # `grep -q` exits at its first match, curl takes SIGPIPE writing the
+          # rest of the body, and `pipefail` reports curl's exit 23 -- so the
+          # check fails precisely when it should pass, depending on which side
+          # wins a race. See the note in the panel step below.
+          curl -fsS http://localhost:9191/healthz -o /tmp/healthz.json
+          cat /tmp/healthz.json
+          grep -q '"status": *"ok"' /tmp/healthz.json
           # readyz proves the panel reached both PostgreSQL and the PowerDNS API.
-          curl -fsS http://localhost:9191/readyz | tee /dev/stderr | grep -q '"powerdns": *true'
-          curl -fsS http://localhost:9191/auth/login | grep -q "Sign in to your account"
+          curl -fsS http://localhost:9191/readyz -o /tmp/readyz.json
+          cat /tmp/readyz.json
+          grep -q '"powerdns": *true' /tmp/readyz.json
+          curl -fsS http://localhost:9191/auth/login -o /tmp/login.html
+          grep -q "Sign in to your account" /tmp/login.html
           # Vendored at build time, so this must be served from our own origin.
-          curl -fsS -o /dev/null -w '%{http_code}\n' \
-            http://localhost:9191/static/vendor/tabler/tabler.min.css | grep -q 200
-          curl -fsS -o /dev/null -w '%{http_code}\n' \
-            http://localhost:9191/static/vendor/tabler/fonts/tabler-icons.woff2 | grep -q 200
+          # An exact comparison, not a substring: `grep -q 200` would also be
+          # satisfied by a 2000-byte body or a stray "200" anywhere in it.
+          for asset in tabler.min.css fonts/tabler-icons.woff2; do
+            code=$(curl -fsS -o /dev/null -w '%{http_code}' \
+              "http://localhost:9191/static/vendor/tabler/$asset")
+            if [ "$code" != 200 ]; then
+              echo "::error::$asset served $code, expected 200"
+              exit 1
+            fi
+          done
 
       - name: Create a zone through the API and resolve it over real DNS
         run: |
@@ -408,7 +424,8 @@ jobs:
             exit 1
           fi
           # And it is listed on the page.
-          curl -fsS -b /tmp/panel.jar http://localhost:9191/forwarding/ | grep -q "fwd.test."
+          curl -fsS -b /tmp/panel.jar http://localhost:9191/forwarding/ -o /tmp/forwarding.html
+          grep -q "fwd.test." /tmp/forwarding.html
 
           # Explicitly with and without the DNSSEC OK bit. A forwarded zone is
           # answered from outside the public chain, so a resolver that
@@ -572,9 +589,18 @@ jobs:
             --data-urlencode "username=admin" \
             --data-urlencode "password=$(cat secrets/webui_admin_password)" \
             --data-urlencode "csrf_token=$token"
-          curl -fsS -b "$jar" http://localhost:9191/zones/ | grep -q "smoke.test."
+          # Deliberately not `curl ... | grep -q`. `grep -q` stops at the
+          # first match and closes the pipe; curl, still writing the rest of
+          # the page, dies of SIGPIPE and exits 23, which `pipefail` turns
+          # into a failed step. The bigger the page and the earlier the match,
+          # the likelier grep wins that race -- so the check failed *because*
+          # the content it was looking for was there. This cost a red arm64
+          # smoke run on a 9,755-byte /zones/ page.
+          curl -fsS -b "$jar" http://localhost:9191/zones/ -o /tmp/zones.html
+          grep -q "smoke.test." /tmp/zones.html
           # And the record editor renders the record we just created.
-          curl -fsS -b "$jar" "http://localhost:9191/zones/smoke.test." | grep -q "192.0.2.42"
+          curl -fsS -b "$jar" "http://localhost:9191/zones/smoke.test." -o /tmp/zone.html
+          grep -q "192.0.2.42" /tmp/zone.html
 
       - name: A wrong password is refused
         run: |

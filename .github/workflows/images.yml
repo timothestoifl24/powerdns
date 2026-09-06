@@ -126,9 +126,15 @@ jobs:
           touch "/tmp/digests/${DIGEST#sha256:}"
           echo "$DIGEST"
 
+      # `__` separates the fields, and `-` never does. Every image here is
+      # named pdns-something, so with `-` as the separator the pattern the
+      # merge job builds for `pdns` (`digest-pdns-*`) also matched
+      # `digest-pdns-recursor-amd64` and the rest -- eight digests where two
+      # were meant. A separator that cannot occur inside an image name makes
+      # that collision impossible rather than merely unlikely.
       - uses: actions/upload-artifact@v7
         with:
-          name: digest-${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          name: digest__${{ matrix.image.name }}__${{ matrix.platform.arch }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
@@ -147,8 +153,10 @@ jobs:
     steps:
       - uses: actions/download-artifact@v7
         with:
-          # Both architectures of this image, and nothing from the other three.
-          pattern: digest-${{ matrix.image }}-*
+          # Both architectures of this image, and nothing from the other
+          # three -- see the note on the upload step for why the separator is
+          # `__`. `digest__pdns__*` cannot match `digest__pdns-recursor__amd64`.
+          pattern: digest__${{ matrix.image }}__*
           merge-multiple: true
           path: /tmp/digests
 
@@ -181,6 +189,7 @@ jobs:
           find . -maxdepth 1 -type f -printf '  %f\n'
           if [ "$count" -ne 2 ]; then
             echo "::error::expected 2 digests (amd64, arm64), found $count"
+            echo "::error::more than 2 usually means the download pattern matched another image's artifacts; fewer means a build leg did not upload one"
             exit 1
           fi
 

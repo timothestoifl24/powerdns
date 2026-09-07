@@ -151,7 +151,7 @@ jobs:
       matrix:
         image: [pdns, pdns-recursor, pdns-db, pdns-webui]
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           # Both architectures of this image, and nothing from the other
           # three -- see the note on the upload step for why the separator is

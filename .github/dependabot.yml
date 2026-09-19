@@ -48,7 +48,7 @@ updates:
           - patch
 
   # ------------------------------------------------------------ Base images
-  # postgres:17-alpine, debian:trixie-slim and the Python slim image. These
+  # postgres:18-alpine, debian:trixie-slim and the Python slim image. These
   # carry the OS-level security fixes that never show up in requirements.txt.
   - package-ecosystem: docker
     directories:
@@ -77,8 +77,8 @@ updates:
           - minor
           - patch
     ignore:
-      # Pinning the major deliberately: a jump to postgres:18 needs a planned
-      # pg_upgrade of the data volume, not a merge. Same for the Debian and
+      # Pinning the major deliberately: a jump to postgres:19 needs a planned
+      # dump and restore of the data volume, not a merge. Same for the Debian and
       # Python majors, which change the PowerDNS version and the ABI of the
       # xmlsec/lxml wheels respectively.
       - dependency-name: postgres

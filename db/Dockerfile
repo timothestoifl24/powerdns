@@ -8,7 +8,15 @@
 # unqualified name fails the build outright on a host with no
 # unqualified-search-registries in /etc/containers/registries.conf. Docker
 # resolves the long form identically.
-FROM docker.io/library/postgres:17-alpine
+FROM docker.io/library/postgres:18-alpine
+
+# PostgreSQL 18 moved the data directory. The image's PGDATA is now
+# /var/lib/postgresql/18/docker and the declared volume is the parent,
+# /var/lib/postgresql -- the layout pg_ctlcluster uses, which keeps each major
+# version in its own subdirectory so pg_upgrade can run without crossing a
+# mount boundary. compose.yml mounts pgdata at /var/lib/postgresql to match.
+# A volume still mounted at the old /var/lib/postgresql/data makes the
+# entrypoint refuse to start, deliberately: see docs/upgrading.md.
 
 # The schema lives outside initdb/ on purpose: the entrypoint would run a
 # .sql file there as the bootstrap superuser, leaving every table owned by

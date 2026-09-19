@@ -25,7 +25,7 @@ local accounts, LDAP / Active Directory, OAuth 2.0 / OpenID Connect and SAML 2.0
        └───────────────────┬─────────────────────────┘ (domains, records)
                            ▼
                     ┌──────────────┐
-                    │      db      │  PostgreSQL 17
+                    │      db      │  PostgreSQL 18
                     └──────────────┘
 ```
 
@@ -87,7 +87,7 @@ plain environment variable instead of a file — each one accepts both `FOO` and
 ├── compose.yml               the four services, wired together
 ├── .env.example              every setting, documented
 ├── db/
-│   ├── Dockerfile            postgres:17-alpine
+│   ├── Dockerfile            postgres:18-alpine
 │   ├── schema/powerdns.sql   PowerDNS 4.9 gpgsql schema, verbatim
 │   └── initdb/
 │       ├── 00-roles.sh                 both unprivileged roles

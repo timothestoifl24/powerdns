@@ -12,6 +12,46 @@ from their labels. Upgrade instructions live in
 
 ## [Unreleased]
 
+## [1.1.0-rc.1] — 2026-09-19
+
+A pre-release, and the reason it is one: it moves the database to PostgreSQL 18,
+which existing deployments cannot take by pulling. The data has to be dumped and
+reloaded, and the volume's mount point changes with it. Read
+[upgrading](https://powerdns.stoifl.app/upgrading#upgrading-to-postgresql-18)
+before you pull, and take the dump while 17 is still running.
+
+A new stack is unaffected — `docker compose up -d --build` on an empty volume
+just starts on 18.
+
+### Breaking changes
+
+- **The `db` service is PostgreSQL 18**, up from 17. PostgreSQL will not start
+  against a data directory written by an older major version, so an existing
+  `pgdata` volume must be dumped with `pg_dumpall`, deleted and reloaded. The
+  upgrade guide has the exact sequence, including how to check the dump before
+  the destructive step.
+- **The `pgdata` volume is mounted at `/var/lib/postgresql`**, not at
+  `/var/lib/postgresql/data`. The 18 image keeps the cluster in
+  `/var/lib/postgresql/18/docker` and declares the parent directory as its
+  volume, which is the layout `pg_ctlcluster` uses and what allows a future
+  `pg_upgrade --link` to see both clusters without crossing a mount boundary.
+  Anyone running a modified `compose.yml` needs to move this mount by hand.
+
+  Left at the old path, the container stops with *in 18+, these Docker images
+  are configured to store database data in a format which is compatible with
+  "pg_ctlcluster"* rather than starting on an empty database beside the real
+  one. That refusal is upstream's, and it is the good outcome: the data is
+  still there.
+
+### Changed
+
+- Dependabot's deliberate pin on the `postgres` major now holds the stack at
+  18; the jump to 19 stays a planned dump and restore rather than a merged
+  pull request.
+- The upgrade guide gained a PostgreSQL 18 section covering the dump, the moved
+  mount, verification afterwards, how to defer the upgrade, and why a rollback
+  needs the 17 dump rather than a fresh one.
+
 ### Fixed
 
 - **The images build under Podman.** Every `FROM` now names its registry in
@@ -118,5 +158,6 @@ everything below has landed since; if you are coming from it, read
 - The panel's `users` table gained `role_locked` and `last_groups`. They are
   added on start-up, so no manual migration is needed.
 
-[Unreleased]: https://github.com/timothestoifl24/powerdns/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/timothestoifl24/powerdns/compare/v1.1.0-rc.1...HEAD
+[1.1.0-rc.1]: https://github.com/timothestoifl24/powerdns/compare/v1.0.1...v1.1.0-rc.1
 [1.0.1]: https://github.com/timothestoifl24/powerdns/compare/v1.0.0...v1.0.1

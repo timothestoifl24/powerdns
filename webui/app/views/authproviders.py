@@ -24,7 +24,7 @@ from ..auth.store import (
     build,
     provider_problem,
 )
-from ..config import AUTH_LDAP, AUTH_OAUTH, AUTH_SAML, ROLES
+from ..config import AUTH_LDAP, AUTH_OAUTH, AUTH_SAML, ROLES, split_uris
 from ..crypto import SecretDecryptionError, encrypt
 from ..database import get_session
 from ..models import AuthProviderConfig
@@ -185,6 +185,10 @@ def _save(row: AuthProviderConfig, *, creating: bool):
     settings = dict(row.settings)
     for field in SETTING_FIELDS[kind]:
         settings[field] = (request.form.get(field) or "").strip()
+    if kind == AUTH_LDAP:
+        # The server list is stored one per line whatever the operator typed,
+        # so a comma-separated paste comes back readable in the textarea.
+        settings["uri"] = "\n".join(split_uris(settings.get("uri", "")))
     for field in BOOLEAN_FIELDS[kind]:
         settings[field] = request.form.get(field) == "on"
     for field in ROLE_FIELDS:

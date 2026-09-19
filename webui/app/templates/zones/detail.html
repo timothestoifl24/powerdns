@@ -82,8 +82,23 @@
           <tbody>
             {% for rrset in rrsets %}
               {% set relname = rrset.name | relname(zone_name) %}
+              {% set is_linked = (rrset.name, rrset.type) in linked_forward %}
+              {% set ptr_target = linked_ptrs.get(rrset.name) if rrset.type == 'PTR' else None %}
               <tr>
-                <td class="font-monospace">{{ relname }}</td>
+                <td class="font-monospace">
+                  {{ relname }}
+                  {% if is_linked %}
+                    <span class="badge bg-teal-lt ms-1"
+                          title="A PTR record is linked to this one and follows its changes">
+                      <i class="ti ti-arrow-back-up me-1"></i>PTR
+                    </span>
+                  {% elif ptr_target %}
+                    <span class="badge bg-teal-lt ms-1"
+                          title="Maintained by {{ ptr_target }}; edit that record to change it">
+                      <i class="ti ti-link me-1"></i>linked
+                    </span>
+                  {% endif %}
+                </td>
                 <td><span class="badge bg-blue-lt">{{ rrset.type }}</span></td>
                 <td class="text-secondary" title="{{ rrset.ttl }} seconds">{{ rrset.ttl | ttl }}</td>
                 <td class="font-monospace text-break">
@@ -108,6 +123,7 @@
                             data-record-content="{{ rrset.records | map(attribute='content') | join('\n') }}"
                             data-record-disabled="{{ '1' if rrset.records and rrset.records[0].disabled else '' }}"
                             data-record-comment="{{ rrset.comments[0].content if rrset.comments else '' }}"
+                            data-record-sync-ptr="{{ '1' if is_linked else '' }}"
                             aria-label="Edit {{ relname }} {{ rrset.type }}">
                       <i class="ti ti-pencil"></i>
                     </button>
@@ -233,6 +249,24 @@
                     Disabled — kept in the database but not served
                   </span>
                 </label>
+              </div>
+
+              {# Address records only: the reverse side of this record. #}
+              <div class="col-12 d-none" data-record-when-type="{{ address_types | join(',') }}">
+                <label class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" name="sync_ptr"
+                         data-record-field="sync_ptr">
+                  <span class="form-check-label">
+                    Keep a matching PTR record in the reverse zone
+                  </span>
+                </label>
+                <small class="form-hint">
+                  The PTR is written into whichever reverse zone on this server covers the
+                  address, and follows this record from then on: change the address, rename
+                  it or delete it and the PTR is updated with it. Unticking this leaves the
+                  record alone and removes the PTR. If no reverse zone covers the address,
+                  the panel says so rather than creating one.
+                </small>
               </div>
             </div>
           </div>

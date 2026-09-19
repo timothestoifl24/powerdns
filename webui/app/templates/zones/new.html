@@ -58,6 +58,33 @@
             <span class="form-check-label">Enable DNSSEC and create a signing key</span>
           </label>
 
+          <hr class="my-3">
+
+          <label class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" name="create_reverse"
+                   id="create-reverse" data-toggle-fields="#reverse-fields"
+                   {{ 'checked' if form.get('create_reverse') }}>
+            <span class="form-check-label">
+              Also create the reverse zone for this zone's networks
+            </span>
+          </label>
+
+          <div id="reverse-fields" class="mt-3 {{ '' if form.get('create_reverse') else 'd-none' }}">
+            <label class="form-label" for="reverse_networks">Networks</label>
+            <textarea id="reverse_networks" name="reverse_networks"
+                      class="form-control font-monospace" rows="2"
+                      placeholder="192.0.2.0/24&#10;2001:db8::/48"
+                      >{{ form.get('reverse_networks', '') }}</textarea>
+            <small class="form-hint">
+              One network per line, in CIDR notation. Each becomes an
+              <code>in-addr.arpa</code> or <code>ip6.arpa</code> zone with the same kind,
+              nameservers and DNSSEC setting as the zone above — <code>192.0.2.0/24</code>
+              creates <code>2.0.192.in-addr.arpa</code>. A prefix longer than a /24
+              (or an IPv6 /64) names the zone it sits inside; a shorter one creates every
+              zone it spans.
+            </small>
+          </div>
+
         </div>
         <div class="card-footer d-flex">
           <a href="{{ url_for('zones.index') }}" class="btn">Cancel</a>

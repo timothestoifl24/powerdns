@@ -3,6 +3,11 @@
 Every change goes through the PowerDNS API. Access is checked per zone: an
 operator or admin sees all of them, everyone else only the zones granted to
 them on the user administration page.
+
+Reverse DNS is handled alongside the forward side rather than as a separate
+chore: a zone can be created together with the reverse zones for its networks,
+and an A/AAAA record can own a PTR that follows it for the rest of its life.
+The arithmetic and the bookkeeping for that live in :mod:`app.reverse`.
 """
 
 from __future__ import annotations
@@ -21,7 +26,7 @@ from flask import (
     url_for,
 )
 
-from .. import audit
+from .. import audit, reverse
 from ..dnsutil import validate_rrset, validate_ttl
 from ..pdns import (
     PdnsError,
@@ -88,6 +93,102 @@ def _forward_locally(zone_name: str, *, remove: bool = False) -> None:
         )
 
 
+def _create_reverse_zone(name: str, *, forward: str, user, **zone_options) -> None:
+    """Create one reverse zone beside the forward zone just created.
+
+    The forward zone already exists by the time this runs, so a failure here
+    is reported and nothing is rolled back: an operator who has to retry wants
+    the zone that did work to still be there. The reverse zone inherits the
+    forward zone's kind, nameservers and DNSSEC setting, because a reverse zone
+    served differently from the zone it belongs to is almost always a mistake.
+    """
+    try:
+        zone = _client().create_zone(name=name, **zone_options)
+    except PdnsError as exc:
+        log.error("could not create reverse zone %s: %s", name, exc)
+        audit.record("zone.create_reverse", target=name, detail=str(exc), actor=user, success=False)
+        flash(f"The reverse zone {name.rstrip('.')} could not be created: {exc}", "warning")
+        return
+
+    created = zone.get("name", canonical(name))
+    audit.record("zone.create_reverse", target=created, detail=f"for {forward}", actor=user)
+    _forward_locally(created)
+    flash(f"Reverse zone {created} has been created.", "success")
+
+
+def _sync_reverse(client, user, *, zone, name, rtype, ttl, contents, enabled, previous=None):
+    """Bring the PTR side of a forward record up to date, and say what changed.
+
+    ``previous`` is the (name, type) pair a rename replaced: its PTRs are
+    retired first, otherwise a record renamed from ``old`` to ``new`` would
+    leave ``old``'s PTR behind pointing at a name that no longer exists.
+
+    Never raises. The forward record has already been written by the time this
+    runs, and a reverse zone being unreachable is not a reason to report the
+    save as failed -- it is a reason to say what did not happen.
+    """
+    try:
+        if previous is not None and previous != (canonical(name), rtype):
+            stale = reverse.sync_record(
+                client,
+                user,
+                zone=zone,
+                name=previous[0],
+                rtype=previous[1],
+                ttl=ttl,
+                addresses=[],
+                enabled=False,
+            )
+            for message, category in stale.messages():
+                flash(message, category)
+
+        result = reverse.sync_record(
+            client,
+            user,
+            zone=zone,
+            name=name,
+            rtype=rtype,
+            ttl=ttl,
+            addresses=contents,
+            enabled=enabled,
+        )
+    except PdnsError as exc:
+        log.error("reverse sync failed for %s %s: %s", name, rtype, exc)
+        flash(f"The reverse record could not be updated: {exc}", "warning")
+        return
+
+    for message, category in result.messages():
+        flash(message, category)
+    if result.changed:
+        audit.record(
+            "record.reverse_sync",
+            target=f"{canonical(name)} {rtype}",
+            detail=(
+                f"written={len(result.written)} removed={len(result.removed)}"
+                + (" stolen=" + ",".join(result.stolen) if result.stolen else "")
+            ),
+            actor=user,
+        )
+
+
+def _unlink_edited_ptr(name: str, contents: list[str]) -> None:
+    """Hand a linked PTR back when an operator edits it in the reverse zone.
+
+    The panel only owns a PTR for as long as it answers with the forward name
+    it was created from. Once someone points it somewhere else by hand, that
+    is their record: the link goes, both records stay.
+    """
+    link = reverse.link_for_ptr(name)
+    if link is None or [canonical(content) for content in contents] == [link.forward_name]:
+        return
+    reverse.forget_ptr(name)
+    flash(
+        f"{name.rstrip('.')} is no longer linked to {link.forward_name.rstrip('.')}: "
+        "it now answers with something else, so the panel will leave it alone.",
+        "info",
+    )
+
+
 def _handle_pdns_error(exc: PdnsError, action: str):
     """Turn an API failure into a flash message and a sensible redirect."""
     log.error("PowerDNS API error during %s: %s", action, exc)
@@ -138,6 +239,7 @@ def create():
             if line.strip()
         ]
         dnssec = request.form.get("dnssec") == "on"
+        with_reverse = request.form.get("create_reverse") == "on"
 
         problems: list[str] = []
         if not name:
@@ -148,6 +250,19 @@ def create():
             problems.append("A slave zone needs at least one master address.")
         if kind != "Slave" and not nameservers:
             problems.append("Add at least one nameserver, or the zone will not resolve.")
+
+        # Worked out before anything is created, so a mistyped network is a
+        # form error rather than a forward zone with no reverse beside it.
+        reverse_zones: list[str] = []
+        if with_reverse:
+            reverse_zones, reverse_problems = reverse.reverse_zones_for_networks(
+                request.form.get("reverse_networks") or ""
+            )
+            problems.extend(reverse_problems)
+            if not reverse_zones and not reverse_problems:
+                problems.append(
+                    "Enter the network the reverse zone is for, for example 192.0.2.0/24."
+                )
 
         if problems:
             flash_errors(problems)
@@ -186,6 +301,19 @@ def create():
         )
         _forward_locally(zone.get("name") or canonical(name))
         flash(f"Zone {zone.get('name', name)} has been created.", "success")
+
+        for reverse_zone in reverse_zones:
+            _create_reverse_zone(
+                reverse_zone,
+                forward=zone.get("name", canonical(name)),
+                user=user,
+                kind=kind,
+                nameservers=nameservers,
+                masters=masters,
+                soa_edit_api=current_app.config["DEFAULT_SOA_EDIT_API"],
+                dnssec=dnssec,
+            )
+
         return redirect(url_for("zones.detail", zone_id=zone.get("id") or canonical(name)))
 
     return render_template("zones/new.html", default_nameservers=defaults, form={})
@@ -218,6 +346,15 @@ def detail(zone_id: str):
     editable = [rrset for rrset in rrsets if rrset.get("type") not in MANAGED_TYPES]
     managed = [rrset for rrset in rrsets if rrset.get("type") in MANAGED_TYPES]
 
+    # Which record sets on this page take part in a link, so the page can show
+    # it and the editor can open with the box already ticked. Both directions
+    # are looked up: a zone can hold forward records, PTRs, or both.
+    links = reverse.links_for_zone(zone.get("name", zone_name))
+    linked_forward = {(link.forward_name, link.forward_type) for link in links}
+    linked_ptrs = {
+        link.ptr_name: link.forward_name for link in links if link.reverse_zone == zone_name
+    }
+
     return render_template(
         "zones/detail.html",
         zone=zone,
@@ -225,6 +362,9 @@ def detail(zone_id: str):
         rrsets=editable,
         managed_rrsets=managed,
         default_ttl=current_app.config["DEFAULT_TTL"],
+        linked_forward=linked_forward,
+        linked_ptrs=linked_ptrs,
+        address_types=sorted(reverse.ADDRESS_TYPES),
     )
 
 
@@ -243,6 +383,10 @@ def save_record(zone_id: str):
     ]
     disabled = request.form.get("disabled") == "on"
     comment = (request.form.get("comment") or "").strip()[:512]
+    # Whether this address record should own a PTR. Unticking it on a record
+    # that has one is how the link is broken, so the value matters even when
+    # it is off.
+    sync_ptr = request.form.get("sync_ptr") == "on"
     # The name/type pair being replaced, when the operator renamed a record.
     original_name = request.form.get("original_name") or ""
     original_type = (request.form.get("original_type") or "").upper().strip()
@@ -272,6 +416,10 @@ def save_record(zone_id: str):
         flash_errors(problems)
         return redirect(url_for("zones.detail", zone_id=zone_id))
 
+    # The (name, type) a rename leaves behind, so its PTRs can be retired
+    # after the write succeeds.
+    previous_pair: tuple[str, str] | None = None
+
     try:
         # A rename is a delete of the old set plus a write of the new one;
         # PowerDNS has no rename operation.
@@ -279,6 +427,7 @@ def save_record(zone_id: str):
             original_absolute = absolute_name(original_name, zone_name)
             if (original_absolute, original_type) != (name, rtype):
                 client.delete_rrset(zone_id, original_absolute, original_type)
+                previous_pair = (original_absolute, original_type)
 
         client.replace_rrset(
             zone_id,
@@ -309,6 +458,26 @@ def save_record(zone_id: str):
         actor=user,
     )
     flash(f"{relative_name(name, zone_name)} {rtype} has been saved.", "success")
+
+    if rtype in reverse.ADDRESS_TYPES or previous_pair is not None:
+        _sync_reverse(
+            client,
+            user,
+            zone=zone_name,
+            name=name,
+            rtype=rtype,
+            ttl=ttl,
+            contents=contents,
+            # A disabled record answers nothing, so a PTR pointing at it would
+            # be a dangling answer; it is retired until the record comes back.
+            enabled=sync_ptr and not disabled,
+            previous=previous_pair,
+        )
+    if rtype == "PTR":
+        _unlink_edited_ptr(name, contents)
+    if previous_pair is not None and previous_pair[1] == "PTR":
+        reverse.forget_ptr(previous_pair[0])
+
     return redirect(url_for("zones.detail", zone_id=zone_id))
 
 
@@ -328,8 +497,9 @@ def delete_record(zone_id: str):
         flash(f"{rtype} records are maintained by PowerDNS.", "warning")
         return redirect(url_for("zones.detail", zone_id=zone_id))
 
+    client = _client()
     try:
-        _client().delete_rrset(zone_id, name, rtype)
+        client.delete_rrset(zone_id, name, rtype)
     except PdnsError as exc:
         log.error("could not delete %s %s from %s: %s", rtype, name, zone_id, exc)
         flash(str(exc), "danger")
@@ -340,6 +510,23 @@ def delete_record(zone_id: str):
 
     audit.record("record.delete", target=f"{name} {rtype}", actor=user)
     flash(f"{relative_name(name, zone_name)} {rtype} has been deleted.", "success")
+
+    if rtype in reverse.ADDRESS_TYPES:
+        # The forward record is gone, so any PTR the panel created for it now
+        # answers with a name that resolves to nothing.
+        _sync_reverse(
+            client,
+            user,
+            zone=zone_name,
+            name=name,
+            rtype=rtype,
+            ttl=current_app.config["DEFAULT_TTL"],
+            contents=[],
+            enabled=False,
+        )
+    elif rtype == "PTR":
+        reverse.forget_ptr(name)
+
     return redirect(url_for("zones.detail", zone_id=zone_id))
 
 
@@ -365,6 +552,9 @@ def delete(zone_id: str):
         return redirect(url_for("zones.detail", zone_id=zone_id))
 
     audit.record("zone.delete", target=zone_name, actor=user)
+    # Both sides of any link through this zone are gone with it; keeping the
+    # rows would only let the panel write to records that no longer exist.
+    reverse.forget_zone(zone_name)
     _forward_locally(zone_name, remove=True)
     flash(f"Zone {zone_name} and all of its records have been deleted.", "success")
     return redirect(url_for("zones.index"))

@@ -92,6 +92,17 @@ def env_list(name: str, default: tuple[str, ...] = ()) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def split_uris(raw: str) -> list[str]:
+    """Split a server setting into individual URIs, in order.
+
+    Commas, whitespace and newlines all separate, because all three are what
+    people reach for: ``LDAP_URI`` in an ``.env`` file is naturally comma
+    separated, while the textarea on the provider form is one per line.
+    """
+    separated = (raw or "").replace(",", " ").replace(";", " ")
+    return [item.strip() for item in separated.split() if item.strip()]
+
+
 def _role_or_none(name: str, default: str) -> str | None:
     """A role name, or ``None`` when the value is ``none``/empty.
 
@@ -172,6 +183,9 @@ class GroupRoleMap:
 @dataclass(frozen=True)
 class LdapConfig:
     enabled: bool = False
+    #: One or more server URIs. Several -- separated by commas, spaces or
+    #: newlines -- are tried in order, so a directory with two domain
+    #: controllers keeps working when the first one is down. See :attr:`uris`.
     uri: str = ""
     start_tls: bool = False
     tls_verify: bool = True
@@ -188,6 +202,17 @@ class LdapConfig:
     group_filter: str = ""
     connect_timeout: int = 5
     roles: GroupRoleMap = field(default_factory=GroupRoleMap)
+
+    @property
+    def uris(self) -> tuple[str, ...]:
+        """The configured servers, in the order they should be tried."""
+        return tuple(split_uris(self.uri))
+
+    @property
+    def primary_uri(self) -> str:
+        """The first server, for messages that name one."""
+        uris = self.uris
+        return uris[0] if uris else ""
 
     @classmethod
     def from_env(cls) -> LdapConfig:

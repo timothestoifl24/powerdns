@@ -16,6 +16,17 @@
    * ------------------------------------------------------------- */
   var recordModal = document.getElementById("record-modal");
   if (recordModal) {
+    // Blocks that only apply to some record types, such as the reverse-record
+    // option on A/AAAA. Wired once: the type can change while the modal is open.
+    var typeField = recordModal.querySelector('[data-record-field="type"]');
+    var applyRecordType = function () {
+      recordModal.querySelectorAll("[data-record-when-type]").forEach(function (block) {
+        var types = block.getAttribute("data-record-when-type").split(",");
+        block.classList.toggle("d-none", types.indexOf(typeField.value) === -1);
+      });
+    };
+    if (typeField) typeField.addEventListener("change", applyRecordType);
+
     recordModal.addEventListener("show.bs.modal", function (event) {
       var trigger = event.relatedTarget;
       if (!trigger) return;
@@ -36,6 +47,7 @@
       field("content").value = isNew ? "" : data("content");
       field("comment").value = isNew ? "" : data("comment");
       field("disabled").checked = !isNew && data("disabled") === "1";
+      field("sync_ptr").checked = !isNew && data("sync-ptr") === "1";
 
       var type = field("type");
       type.value = isNew ? "A" : data("type");
@@ -50,6 +62,8 @@
       // Tells the server which set to replace when the name or type changes.
       field("original_name").value = isNew ? "" : data("name");
       field("original_type").value = isNew ? "" : data("type");
+
+      applyRecordType();
 
       // SOA is edited, never renamed or retyped.
       var isSoa = !isNew && data("type") === "SOA";
@@ -140,6 +154,20 @@
         event.preventDefault();
       }
     });
+  });
+
+  /* ---------------------------------------------------------------
+   * A checkbox that reveals the fields it needs, such as the reverse-zone
+   * networks on the new-zone form.
+   * ------------------------------------------------------------- */
+  document.querySelectorAll("[data-toggle-fields]").forEach(function (box) {
+    var target = document.querySelector(box.getAttribute("data-toggle-fields"));
+    if (!target) return;
+    var apply = function () {
+      target.classList.toggle("d-none", !box.checked);
+    };
+    box.addEventListener("change", apply);
+    apply();
   });
 
   /* ---------------------------------------------------------------

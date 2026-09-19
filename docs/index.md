@@ -45,6 +45,11 @@ features:
     details: Global forwarders and per-zone forward rules on a bundled PowerDNS Recursor. Your own zones stay answerable automatically, and the resolver is not open to the internet by default.
     link: /guide#forwarding
     linkText: Set up forwarding
+  - icon: 🔁
+    title: Reverse DNS that keeps itself honest
+    details: Create a zone together with the in-addr.arpa/ip6.arpa zones for its networks, and give an A or AAAA record a PTR that follows it — repointed, renamed, disabled or deleted, the reverse side keeps up.
+    link: /guide#linked-ptr-records
+    linkText: Linking a PTR
   - icon: 🔏
     title: DNSSEC without the ceremony
     details: Enable signing on a zone and a combined signing key is created for you. The DS records to hand your registrar are shown ready to copy.

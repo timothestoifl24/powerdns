@@ -18,6 +18,16 @@
   </div>
 {% endmacro %}
 
+{% macro lines(name, label, value='', help='', placeholder='', rows=2) %}
+  <div class="mb-3">
+    <label class="form-label" for="{{ name }}">{{ label }}</label>
+    <textarea class="form-control font-monospace" id="{{ name }}" name="{{ name }}"
+              rows="{{ rows }}" placeholder="{{ placeholder }}"
+              autocomplete="off">{{ value }}</textarea>
+    {% if help %}<small class="form-hint">{{ help }}</small>{% endif %}
+  </div>
+{% endmacro %}
+
 {% macro secret(name, label, stored, help='') %}
   <div class="mb-3">
     <label class="form-label" for="{{ name }}">{{ label }}</label>
@@ -70,8 +80,11 @@
           <div class="card-header"><h3 class="card-title">{{ kind_label }}</h3></div>
           <div class="card-body">
             {% if kind == 'ldap' %}
-              {{ field('uri', 'Server URI', provider.setting('uri'),
-                       'ldap://host:389 or ldaps://host:636', placeholder='ldaps://dc.example.com') }}
+              {{ lines('uri', 'Server URIs', provider.setting('uri'),
+                       'ldap://host:389 or ldaps://host:636. Several servers, one per line,
+                        are tried in order: the first that answers is used, so list the
+                        preferred domain controller first.',
+                       placeholder='ldaps://dc1.example.com\nldaps://dc2.example.com') }}
               {{ toggle('start_tls', 'Use StartTLS', provider.settings.get('start_tls'),
                         'For ldap:// on port 389. Not needed with ldaps://.') }}
               {{ toggle('tls_verify', 'Verify the TLS certificate',

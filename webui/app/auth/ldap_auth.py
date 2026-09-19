@@ -9,6 +9,10 @@ The flow is the standard two-bind dance:
    learn their real DN and attributes. Directories rarely let you predict a DN.
 2. Re-bind as that DN with the supplied password. A successful bind is the
    password check -- we never read or compare a password hash ourselves.
+
+Several servers can be configured. They are tried in order and the first one
+that answers is used, so a directory published by two domain controllers keeps
+authenticating when one of them is rebooted.
 """
 
 from __future__ import annotations
@@ -16,7 +20,7 @@ from __future__ import annotations
 import logging
 import ssl
 
-from ldap3 import ALL, AUTO_BIND_NO_TLS, SIMPLE, Connection, Server, Tls
+from ldap3 import ALL, AUTO_BIND_NO_TLS, FIRST, SIMPLE, Connection, Server, ServerPool, Tls
 from ldap3.core.exceptions import LDAPException
 from ldap3.utils.conv import escape_filter_chars
 
@@ -44,25 +48,68 @@ def escape_filter_value(value: str) -> str:
     return escape_filter_chars(value)
 
 
-def _build_server(config: LdapConfig) -> Server:
-    tls = None
-    if config.uri.lower().startswith("ldaps://") or config.start_tls:
-        tls = Tls(
-            validate=ssl.CERT_REQUIRED if config.tls_verify else ssl.CERT_NONE,
-            ca_certs_file=config.ca_cert_file or None,
-            version=ssl.PROTOCOL_TLS_CLIENT if config.tls_verify else ssl.PROTOCOL_TLS,
+#: How long a server that failed to answer is kept out of the pool, in
+#: seconds. Without it every sign-in would wait for the dead server's connect
+#: timeout again; with it, the first failure is paid once a minute rather than
+#: once per attempt, and a server that comes back is picked up automatically.
+POOL_EXHAUST_SECONDS = 60
+
+
+def _build_tls(config: LdapConfig, uri: str) -> Tls | None:
+    """The TLS settings for one server, or ``None`` for a plain connection."""
+    if not (uri.lower().startswith("ldaps://") or config.start_tls):
+        return None
+    if not config.tls_verify:
+        log.warning(
+            "LDAP_TLS_VERIFY is off: the directory's certificate is not being "
+            "checked, so the connection is open to interception"
         )
-        if not config.tls_verify:
-            log.warning(
-                "LDAP_TLS_VERIFY is off: the directory's certificate is not being "
-                "checked, so the connection is open to interception"
-            )
-    return Server(
-        config.uri,
-        get_info=ALL,
-        tls=tls,
-        connect_timeout=config.connect_timeout,
+    return Tls(
+        validate=ssl.CERT_REQUIRED if config.tls_verify else ssl.CERT_NONE,
+        ca_certs_file=config.ca_cert_file or None,
+        version=ssl.PROTOCOL_TLS_CLIENT if config.tls_verify else ssl.PROTOCOL_TLS,
     )
+
+
+def _build_server(config: LdapConfig) -> Server | ServerPool:
+    """One :class:`Server`, or a failover pool when several are configured.
+
+    ``FIRST`` rather than round robin: these are replicas of one directory, so
+    the order in the setting is a preference -- the second server is where you
+    go when the first is unreachable, not half the time. Each server is tried
+    once per sign-in before the next is used, so a dead first entry costs one
+    connect timeout rather than an unbounded number of retries.
+    """
+    uris = config.uris or [config.uri]
+    servers = [
+        Server(
+            uri,
+            get_info=ALL,
+            tls=_build_tls(config, uri),
+            connect_timeout=config.connect_timeout,
+        )
+        for uri in uris
+    ]
+    if len(servers) == 1:
+        return servers[0]
+    log.debug("LDAP: %d servers configured, trying them in order", len(servers))
+    return ServerPool(
+        servers,
+        pool_strategy=FIRST,
+        active=len(servers),
+        exhaust=POOL_EXHAUST_SECONDS,
+    )
+
+
+def _needs_start_tls(config: LdapConfig, server) -> bool:
+    """Whether StartTLS should be negotiated on this connection.
+
+    A server reached over ``ldaps://`` is already inside TLS, and asking it to
+    start TLS again fails. With one server that never happens -- nobody turns
+    StartTLS on for an ldaps URI -- but a failover list may mix the two, and
+    the setting is a single switch for the whole provider.
+    """
+    return bool(config.start_tls) and not getattr(server, "ssl", False)
 
 
 def _service_connection(config: LdapConfig, server: Server) -> Connection:
@@ -80,13 +127,14 @@ def _service_connection(config: LdapConfig, server: Server) -> Connection:
             )
         else:
             connection = Connection(server, auto_bind=AUTO_BIND_NO_TLS, raise_exceptions=False)
-        if config.start_tls:
+        if _needs_start_tls(config, connection.server):
             connection.start_tls()
         if not connection.bound and not connection.bind():
             raise LdapAuthError(f"The LDAP service account could not bind: {connection.result}")
         return connection
     except LDAPException as exc:
-        raise LdapAuthError(f"Cannot reach the LDAP server at {config.uri}: {exc}") from exc
+        where = " or ".join(config.uris) or config.uri
+        raise LdapAuthError(f"Cannot reach the LDAP server at {where}: {exc}") from exc
 
 
 #: Used when a group search base is configured but no filter. Covers the three
@@ -251,16 +299,20 @@ def authenticate(config: LdapConfig, username: str, password: str) -> IdentityCl
             values = attrs.get(name) or []
             return str(values[0]) if values else default
 
-        # The actual password check.
+        # The actual password check, against the server that just answered the
+        # search rather than the pool: with several servers the pool could pick
+        # a different one, and a replica that has not caught up yet would fail
+        # the bind for a DN it does not have.
+        bound_server = connection.server or server
         user_connection = Connection(
-            server,
+            bound_server,
             user=user_dn,
             password=password,
             authentication=SIMPLE,
             raise_exceptions=False,
             receive_timeout=config.connect_timeout,
         )
-        if config.start_tls:
+        if _needs_start_tls(config, bound_server):
             try:
                 user_connection.open()
                 user_connection.start_tls()
@@ -320,7 +372,12 @@ def test_connection(config: LdapConfig) -> str:
                 f"Bound successfully, but the base DN {config.base_dn!r} could not be read."
             )
         who = config.bind_dn or "anonymously"
-        return f"bound as {who}, base DN {config.base_dn} is readable"
+        where = ""
+        if len(config.uris) > 1 and getattr(connection.server, "name", ""):
+            # With a failover list, which server answered is the useful part:
+            # a successful test against the second one means the first is down.
+            where = f" via {connection.server.name}"
+        return f"bound as {who}{where}, base DN {config.base_dn} is readable"
     finally:
         try:
             connection.unbind()

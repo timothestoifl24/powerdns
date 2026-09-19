@@ -251,6 +251,28 @@ class PdnsClient(ApiClient):
         zone = self.get_zone(zone_id)
         return [RRSet.from_api(item) for item in zone.get("rrsets", [])]
 
+    def get_rrset(self, zone_id: str, name: str, rtype: str) -> RRSet | None:
+        """One record set, or ``None`` when the zone has no such set.
+
+        PowerDNS can filter server-side, which matters for a large zone, but
+        the answer is filtered again here: older versions ignore the query
+        parameters and return the whole zone rather than erroring.
+        """
+        wanted_name, wanted_type = canonical(name), rtype.upper()
+        payload = (
+            self._request(
+                "GET",
+                self._zone_path(zone_id),
+                params={"rrset_name": wanted_name, "rrset_type": wanted_type},
+            )
+            or {}
+        )
+        for item in payload.get("rrsets", []):
+            rrset = RRSet.from_api(item)
+            if canonical(rrset.name) == wanted_name and rrset.type == wanted_type:
+                return rrset
+        return None
+
     def create_zone(
         self,
         name: str,

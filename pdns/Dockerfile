@@ -4,7 +4,12 @@
 # repository and no signing key to manage. To track upstream releases more
 # closely, swap this for repo.powerdns.com -- see README, "Using a different
 # PowerDNS build".
-FROM debian:trixie-slim
+
+# The registry is spelled out because Podman has no implicit docker.io: an
+# unqualified name fails the build outright on a host with no
+# unqualified-search-registries in /etc/containers/registries.conf. Docker
+# resolves the long form identically.
+FROM docker.io/library/debian:trixie-slim
 
 # Debian's postinst wants to start the service; there is no init in a build.
 RUN set -eux; \

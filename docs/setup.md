@@ -16,6 +16,19 @@ description: From a clean host to a working authoritative nameserver — require
 Nothing else. There is no Node, Python or PowerDNS installation on the host: it
 all happens in the images.
 
+::: tip Podman and short image names
+Every `FROM` in this repository names its registry in full
+(`docker.io/library/postgres:17-alpine`). Podman, unlike Docker, has no implicit
+`docker.io`, so a bare `postgres:17-alpine` fails with *short-name … did not
+resolve to an alias and no unqualified-search registries are defined* unless the
+host sets `unqualified-search-registries` in `/etc/containers/registries.conf`.
+Keep the registry in place if you swap a base image for one of your own.
+
+`podman compose build` also reports that failure at the very end of the run,
+after the services that did build, so the real error is well above the summary
+line — build one service at a time to see it.
+:::
+
 ## Install
 
 ```bash

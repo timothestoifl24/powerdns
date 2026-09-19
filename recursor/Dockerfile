@@ -6,7 +6,12 @@
 # to the pdns container; see the admin panel's Forwarding page.
 #
 # Same base as the authoritative image so both track one Debian release.
-FROM debian:trixie-slim
+
+# The registry is spelled out because Podman has no implicit docker.io: an
+# unqualified name fails the build outright on a host with no
+# unqualified-search-registries in /etc/containers/registries.conf. Docker
+# resolves the long form identically.
+FROM docker.io/library/debian:trixie-slim
 
 RUN set -eux; \
     printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d; \

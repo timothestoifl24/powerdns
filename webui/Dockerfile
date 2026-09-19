@@ -5,7 +5,12 @@
 # panel should not make requests to the public internet from the operator's
 # browser, and it must keep working on an isolated network.
 # ---------------------------------------------------------------------------
-FROM debian:trixie-slim AS assets
+
+# The registry is spelled out because Podman has no implicit docker.io: an
+# unqualified name fails the build outright on a host with no
+# unqualified-search-registries in /etc/containers/registries.conf. Docker
+# resolves the long form identically.
+FROM docker.io/library/debian:trixie-slim AS assets
 
 ARG TABLER_VERSION=1.4.0
 ARG TABLER_ICONS_VERSION=3.46.0
@@ -38,7 +43,7 @@ RUN set -eux; \
 # ---------------------------------------------------------------------------
 # Stage 2: Python dependencies.
 # ---------------------------------------------------------------------------
-FROM python:3.14-slim-trixie AS deps
+FROM docker.io/library/python:3.14-slim-trixie AS deps
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -59,7 +64,7 @@ RUN python -m venv /opt/venv \
 # ---------------------------------------------------------------------------
 # Stage 3: runtime.
 # ---------------------------------------------------------------------------
-FROM python:3.14-slim-trixie
+FROM docker.io/library/python:3.14-slim-trixie
 
 LABEL org.opencontainers.image.title="PowerDNS admin panel" \
       org.opencontainers.image.description="Tabler-themed web UI for PowerDNS with local, LDAP, OAuth and SAML sign-in" \

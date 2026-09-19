@@ -12,7 +12,15 @@ from their labels. Upgrade instructions live in
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **The images build under Podman.** Every `FROM` now names its registry in
+  full (`docker.io/library/…`). Podman has no implicit `docker.io`, so on a host
+  without `unqualified-search-registries` in `/etc/containers/registries.conf`
+  the bare names failed with *short-name … did not resolve to an alias*, and
+  `podman compose up --build` reported it only as `Build command failed` at the
+  end of the run. Docker resolves the fully qualified form identically, so
+  nothing changes there.
 
 ## [1.0.1] — 2026-09-06
 

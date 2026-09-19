@@ -107,8 +107,11 @@ class TestThePage:
         login("operator")
         page = client.get("/zones/example.com./settings").data
         assert b'value="hostmaster@example.com"' in page
-        assert b"ns1.example.com" in page
         assert b'value="604800"' in page
+        # The whole field, not a hostname somewhere on the page: both
+        # nameservers, in order, and nothing else.
+        field = re.search(rb'<textarea[^>]*id="nameservers"[^>]*>(.*?)</textarea>', page, re.S)
+        assert field and field.group(1).strip() == b"ns1.example.com.\nns2.example.com."
 
     def test_it_is_linked_from_the_zone_page(self, client, users, login, zone):
         login("operator")
@@ -353,11 +356,12 @@ class TestTheReverseZoneLink:
     ):
         login("operator")
         save(client, token, reverse_zones="2.0.192.in-addr.arpa.")
+        # Linked, not merely mentioned: each page carries a link to the other.
         forward = client.get("/zones/example.com.").data
-        assert b"2.0.192.in-addr.arpa" in forward
+        assert b'href="/zones/2.0.192.in-addr.arpa."' in forward
         reverse_page = client.get("/zones/2.0.192.in-addr.arpa.").data
         assert b"reverse zone for" in reverse_page
-        assert b"example.com" in reverse_page
+        assert b'href="/zones/example.com."' in reverse_page
 
 
 class TestTheRecordEditorFollowsTheLink:

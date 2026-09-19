@@ -12,13 +12,19 @@ from their labels. Upgrade instructions live in
 
 ## [Unreleased]
 
-## [1.1.0-rc.1] — 2026-09-19
+## [1.1.0-beta] — 2026-09-19
 
-A pre-release, and the reason it is one: it moves the database to PostgreSQL 18,
-which existing deployments cannot take by pulling. The data has to be dumped and
-reloaded, and the volume's mount point changes with it. Read
+A beta, published for testing ahead of v1.1.0. It moves the database to
+PostgreSQL 18, which existing deployments cannot take by pulling: the data has
+to be dumped and reloaded, and the volume's mount point changes with it. Read
 [upgrading](https://powerdns.stoifl.app/upgrading#upgrading-to-postgresql-18)
 before you pull, and take the dump while 17 is still running.
+
+Being a pre-release, it does not move the `latest` tag — pull
+`ghcr.io/timothestoifl24/pdns-db:1.1.0-beta` and the matching tags for the other
+three images to try it. Exercise it somewhere you can afford to lose, on a copy
+of a real dump rather than an empty database: the reload is the part worth
+testing, and it is the part this stack cannot test for you.
 
 A new stack is unaffected — `docker compose up -d --build` on an empty volume
 just starts on 18.
@@ -158,6 +164,6 @@ everything below has landed since; if you are coming from it, read
 - The panel's `users` table gained `role_locked` and `last_groups`. They are
   added on start-up, so no manual migration is needed.
 
-[Unreleased]: https://github.com/timothestoifl24/powerdns/compare/v1.1.0-rc.1...HEAD
-[1.1.0-rc.1]: https://github.com/timothestoifl24/powerdns/compare/v1.0.1...v1.1.0-rc.1
+[Unreleased]: https://github.com/timothestoifl24/powerdns/compare/v1.1.0-beta...HEAD
+[1.1.0-beta]: https://github.com/timothestoifl24/powerdns/compare/v1.0.1...v1.1.0-beta
 [1.0.1]: https://github.com/timothestoifl24/powerdns/compare/v1.0.0...v1.0.1

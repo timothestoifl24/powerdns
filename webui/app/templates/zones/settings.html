@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}{{ zone_name }} settings · {{ site_name }}{% endblock %}
+{% block header_pretitle %}Zone{% endblock %}
+{% block header_title %}<span class="font-monospace">{{ zone_name }}</span>{% endblock %}
+{% block header_subtitle %}Settings{% endblock %}
+{% block header_actions %}
+  <a href="{{ url_for('zones.detail', zone_id=zone.id) }}" class="btn">
+    <i class="ti ti-arrow-left me-2"></i>Back to records
+  </a>
+{% endblock %}
+
+{% block content %}
+  <form method="post" novalidate>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="row justify-content-center">
+      <div class="col-lg-9">
+
+        <div class="card mb-3">
+          <div class="card-header"><h3 class="card-title">Zone</h3></div>
+          <div class="card-body">
+            <div class="mb-3">
+              <label class="form-label" for="kind">Kind</label>
+              <select id="kind" name="kind" class="form-select" data-zone-kind
+                      {{ 'disabled' if not current_user.is_operator }}>
+                {% for kind in zone_kinds %}
+                  <option value="{{ kind }}"
+                    {{ 'selected' if form.get('kind', 'Native') == kind }}>{{ kind }}</option>
+                {% endfor %}
+              </select>
+              {% if not current_user.is_operator %}
+                <small class="form-hint">
+                  Only an operator can change how the zone is served.
+                </small>
+              {% endif %}
+              <small class="form-hint">
+                <strong>Native</strong> replicates through PostgreSQL itself.
+                <strong>Master</strong> notifies secondaries over AXFR.
+                <strong>Slave</strong> transfers its contents from a master — its nameservers
+                and SOA come from there, so they cannot be edited here.
+              </small>
+            </div>
+
+            <div class="mb-0 {{ '' if is_slave else 'd-none' }}" data-when-kind="Slave">
+              <label class="form-label" for="masters">Master addresses</label>
+              <textarea id="masters" name="masters" class="form-control font-monospace" rows="2"
+                        placeholder="192.0.2.53&#10;2001:db8::53"
+                        {{ 'readonly' if not current_user.is_operator }}
+                        >{{ form.get('masters', '') }}</textarea>
+              <small class="form-hint">One IP address per line to transfer the zone from.</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="card mb-3 {{ 'd-none' if is_slave }}" data-when-kind="Native,Master">
+          <div class="card-header"><h3 class="card-title">Nameservers</h3></div>
+          <div class="card-body">
+            <div class="row g-3">
+              <div class="col-md-9">
+                <label class="form-label" for="nameservers">Nameservers</label>
+                <textarea id="nameservers" name="nameservers" class="form-control font-monospace"
+                          rows="3" placeholder="ns1.example.com&#10;ns2.example.com"
+                          >{{ form.get('nameservers', '') }}</textarea>
+                <small class="form-hint">
+                  One per line. These are the zone's apex <code>NS</code> records — saving
+                  replaces the whole set. The trailing dot is added for you.
+                </small>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label" for="ns_ttl">TTL</label>
+                <input type="number" id="ns_ttl" name="ns_ttl" class="form-control" min="0"
+                       value="{{ form.get('ns_ttl', default_ttl) }}">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card mb-3 {{ 'd-none' if is_slave }}" data-when-kind="Native,Master">
+          <div class="card-header">
+            <h3 class="card-title">Start of authority</h3>
+            <div class="card-subtitle text-secondary">
+              serial {{ zone.serial | default('—') }}
+              {% if zone.soa_edit_api %}
+                · maintained by PowerDNS as
+                <code>{{ zone.soa_edit_api }}</code>
+              {% endif %}
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label required" for="mname">Primary nameserver</label>
+                <input type="text" id="mname" name="mname" class="form-control font-monospace"
+                       value="{{ form.get('mname', '') }}" placeholder="ns1.example.com">
+                <small class="form-hint">
+                  The <code>MNAME</code> field: the server secondaries treat as the origin of
+                  the zone.
+                </small>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label required" for="email">Administrator email</label>
+                <input type="email" id="email" name="email" class="form-control"
+                       value="{{ form.get('email', '') }}" placeholder="hostmaster@example.com">
+                <small class="form-hint">
+                  Stored as the SOA's <code>RNAME</code>, where the <code>@</code> becomes a
+                  dot. A dot in the part before the <code>@</code> is escaped for you.
+                </small>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label" for="refresh">Refresh</label>
+                <input type="number" id="refresh" name="refresh" class="form-control" min="0"
+                       value="{{ form.get('refresh', '') }}">
+                <small class="form-hint">How often a secondary checks the serial.</small>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label" for="retry">Retry</label>
+                <input type="number" id="retry" name="retry" class="form-control" min="0"
+                       value="{{ form.get('retry', '') }}">
+                <small class="form-hint">Wait after a failed check.</small>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label" for="expire">Expire</label>
+                <input type="number" id="expire" name="expire" class="form-control" min="0"
+                       value="{{ form.get('expire', '') }}">
+                <small class="form-hint">When a secondary stops answering.</small>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label" for="minimum">Negative TTL</label>
+                <input type="number" id="minimum" name="minimum" class="form-control" min="0"
+                       value="{{ form.get('minimum', '') }}">
+                <small class="form-hint">How long "no such name" is cached.</small>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label" for="soa_ttl">Record TTL</label>
+                <input type="number" id="soa_ttl" name="soa_ttl" class="form-control" min="0"
+                       value="{{ form.get('soa_ttl', default_ttl) }}">
+              </div>
+
+              <div class="col-12">
+                <div class="text-secondary small">
+                  <i class="ti ti-info-circle me-1"></i>
+                  The serial is not editable: PowerDNS bumps it on every change, which is what
+                  keeps secondaries and DNSSEC signatures in step.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card mb-3">
+          <div class="card-header">
+            <h3 class="card-title">Reverse zones</h3>
+            <div class="card-subtitle text-secondary">
+              Where this zone's <code>A</code> and <code>AAAA</code> records put their
+              <code>PTR</code>s
+            </div>
+          </div>
+          <div class="card-body">
+            {% if reverse_zones %}
+              <div class="mb-3" id="reverse-zone-list">
+                {% for name in reverse_zones %}
+                  <label class="form-check">
+                    <input class="form-check-input" type="checkbox" name="reverse_zones"
+                           value="{{ name }}" {{ 'checked' if name in linked_reverse }}>
+                    <span class="form-check-label font-monospace">{{ name }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+              <small class="form-hint mb-3 d-block">
+                A record editor in this zone then offers the reverse record with the box already
+                ticked, and says which of these zones the <code>PTR</code> will go into. An
+                address no linked zone covers still falls back to any reverse zone on this
+                server. Unticking a zone here stops new records defaulting to it; the
+                <code>PTR</code>s already linked to a record keep following it.
+              </small>
+            {% else %}
+              <p class="text-secondary">
+                There are no reverse zones on this server yet.
+              </p>
+            {% endif %}
+
+            {% if current_user.is_operator %}
+              <label class="form-label" for="reverse_networks">Create and link a reverse zone</label>
+              <input type="text" id="reverse_networks" name="reverse_networks"
+                     class="form-control font-monospace" placeholder="192.0.2.0/24">
+              <small class="form-hint">
+                A network in CIDR notation. The matching <code>in-addr.arpa</code> or
+                <code>ip6.arpa</code> zone is created with this zone's kind and nameservers,
+                then linked. Leave empty to change nothing.
+              </small>
+            {% endif %}
+          </div>
+        </div>
+
+        {% if is_reverse and linked_forward %}
+          <div class="card mb-3">
+            <div class="card-header"><h3 class="card-title">Linked from</h3></div>
+            <div class="card-body">
+              <p class="text-secondary">
+                These zones send their <code>PTR</code> records here:
+              </p>
+              <div class="btn-list">
+                {% for name in linked_forward %}
+                  <a href="{{ url_for('zones.detail', zone_id=name) }}"
+                     class="btn btn-sm font-monospace">{{ name }}</a>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+        {% endif %}
+
+        <div class="card">
+          <div class="card-footer d-flex">
+            <a href="{{ url_for('zones.detail', zone_id=zone.id) }}" class="btn">Cancel</a>
+            <button type="submit" class="btn btn-primary ms-auto">
+              <i class="ti ti-device-floppy me-2"></i>Save settings
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </form>
+{% endblock %}

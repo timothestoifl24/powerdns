@@ -47,7 +47,12 @@
       field("content").value = isNew ? "" : data("content");
       field("comment").value = isNew ? "" : data("comment");
       field("disabled").checked = !isNew && data("disabled") === "1";
-      field("sync_ptr").checked = !isNew && data("sync-ptr") === "1";
+      // A new record in a zone with linked reverse zones starts with the
+      // reverse record ticked; an existing one reflects whether it has one.
+      var syncPtr = field("sync_ptr");
+      syncPtr.checked = isNew
+        ? syncPtr.getAttribute("data-record-default") === "1"
+        : data("sync-ptr") === "1";
 
       var type = field("type");
       type.value = isNew ? "A" : data("type");

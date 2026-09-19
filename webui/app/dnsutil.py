@@ -7,6 +7,8 @@ the field the operator is editing.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import dns.exception
 import dns.name
 import dns.rdata
@@ -141,3 +143,117 @@ def validate_ttl(raw: str | int) -> tuple[int, str | None]:
     if ttl > 2147483647:
         return 0, "The TTL is larger than the maximum of 2147483647."
     return ttl, None
+
+
+# ---------------------------------------------------------------------------
+# SOA records
+# ---------------------------------------------------------------------------
+
+#: Field order in SOA content, after the two names.
+SOA_TIMERS = ("refresh", "retry", "expire", "minimum")
+
+#: What a zone starts with when its SOA cannot be read. These are the values
+#: PowerDNS itself seeds a new zone with.
+SOA_DEFAULTS = {"refresh": 10800, "retry": 3600, "expire": 604800, "minimum": 3600}
+
+
+@dataclass(frozen=True)
+class Soa:
+    """The seven fields of an SOA record, as the settings form edits them."""
+
+    mname: str = ""
+    rname: str = ""
+    serial: int = 0
+    refresh: int = SOA_DEFAULTS["refresh"]
+    retry: int = SOA_DEFAULTS["retry"]
+    expire: int = SOA_DEFAULTS["expire"]
+    minimum: int = SOA_DEFAULTS["minimum"]
+
+    @property
+    def email(self) -> str:
+        """The administrator address, in the form a person writes it."""
+        return rname_to_email(self.rname)
+
+    def to_content(self) -> str:
+        return (
+            f"{canonical(self.mname)} {self.rname} {self.serial} "
+            f"{self.refresh} {self.retry} {self.expire} {self.minimum}"
+        )
+
+
+def parse_soa(content: str) -> Soa | None:
+    """Read an SOA record's content, or ``None`` if it is not one.
+
+    PowerDNS stores the content verbatim, so this has to cope with whatever is
+    in the zone rather than with a canonical form.
+    """
+    parts = (content or "").split()
+    if len(parts) < 7:
+        return None
+    try:
+        numbers = [int(part) for part in parts[2:7]]
+    except ValueError:
+        return None
+    return Soa(
+        mname=parts[0],
+        rname=parts[1],
+        serial=numbers[0],
+        refresh=numbers[1],
+        retry=numbers[2],
+        expire=numbers[3],
+        minimum=numbers[4],
+    )
+
+
+def email_to_rname(email: str) -> str:
+    """``hostmaster@example.com`` -> ``hostmaster.example.com.``
+
+    The local part keeps its dots, escaped, because the whole thing becomes a
+    DNS name: ``first.last@example.com`` is ``first\\.last.example.com.`` and
+    not a name with an extra label.
+    """
+    value = (email or "").strip()
+    if not value:
+        return ""
+    if "@" not in value:
+        # Already in DNS form, or something the caller validated separately.
+        return canonical(value)
+    local, _, domain = value.rpartition("@")
+    escaped = local.replace(".", "\\.")
+    return canonical(f"{escaped}.{domain}")
+
+
+def rname_to_email(rname: str) -> str:
+    """The inverse of :func:`email_to_rname`, for showing it in a form."""
+    value = (rname or "").strip().rstrip(".")
+    if not value:
+        return ""
+    local: list[str] = []
+    rest = value
+    index = 0
+    while index < len(rest):
+        char = rest[index]
+        if char == "\\" and index + 1 < len(rest):
+            # An escaped dot is part of the local part, not a separator.
+            local.append(rest[index + 1])
+            index += 2
+            continue
+        if char == ".":
+            return f"{''.join(local)}@{rest[index + 1 :]}"
+        local.append(char)
+        index += 1
+    # No separator at all: not an address, so hand it back untouched.
+    return value
+
+
+def validate_email(email: str) -> str | None:
+    """Error message, or ``None`` if ``email`` can become an SOA RNAME."""
+    value = (email or "").strip()
+    if not value:
+        return "Enter the administrator's email address."
+    if value.count("@") != 1:
+        return f"{value!r} is not an email address, for example hostmaster@example.com."
+    local, _, domain = value.partition("@")
+    if not local or not domain or "." not in domain:
+        return f"{value!r} is not an email address, for example hostmaster@example.com."
+    return validate_name(email_to_rname(value))

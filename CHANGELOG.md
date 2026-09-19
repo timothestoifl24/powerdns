@@ -14,9 +14,45 @@ from their labels. Upgrade instructions live in
 
 Everything here is additive: no setting changes meaning, and a stack that
 pulls without ticking any of the new boxes behaves exactly as it did. The
-panel creates one table of its own, `reverse_links`, on start-up.
+panel creates two tables of its own, `reverse_links` and `zone_reverse_links`,
+on start-up.
 
 ### Added
+
+- **Each zone has a settings page**, at **Actions → Zone settings**, for the
+  zone itself rather than the records in it: its kind and a slave's master
+  addresses, the apex nameservers, the SOA — primary nameserver, the
+  administrator's email address, and the refresh, retry, expire and
+  negative-TTL timers — and the reverse zones it is linked to.
+
+  The administrator's address is edited as an address and stored as DNS wants
+  it: the `@` becomes a dot and a dot before the `@` is escaped, so
+  `first.last@example.com` is written as `first\.last.example.com.` and read
+  back as an address rather than as a name with an extra label. The serial is
+  shown but not editable, because PowerDNS bumps it on every change and a hand
+  edit would either be overwritten or, going backwards, stop secondaries
+  transferring. A slave zone takes its nameservers and SOA from its master, so
+  those fields are not offered for one and a hand-posted value is ignored
+  rather than written over the next transfer.
+
+  Anyone who can edit a zone's records can use the page -- the record editor
+  already reaches the same `NS` and `SOA` sets. Changing the kind stays with
+  operators, since that decides how the zone is served rather than what it
+  answers.
+
+- **A zone can be linked to its reverse zones**, on that same page: tick the
+  ones it should use, or (as an operator) create one from a network and link it
+  in the same save. The pairing makes the reverse record a default rather than
+  something to remember -- the record editor in a linked zone opens with *Also
+  create a matching PTR record* already ticked, and names the zone the `PTR`
+  will go into -- and it decides where the `PTR` goes when more than one zone
+  could take it: linked zones are consulted first, anything else on the server
+  after. A zone linked to `0.192.in-addr.arpa` therefore writes there even if
+  an unlinked `2.0.192.in-addr.arpa` would have been the narrower match, while
+  an address no linked zone covers still finds any reverse zone that does.
+  Linking never restricts what can be written, and unticking a zone leaves
+  every existing `PTR` following its record -- it only stops new records
+  defaulting there.
 
 - **A zone can be created together with its reverse zones.** Tick *Also create
   the reverse zone for this zone's networks* on the new-zone form and give the
@@ -36,9 +72,9 @@ panel creates one table of its own, `reverse_links`, on start-up.
   its own (usually because it already exists) is reported without taking the
   forward zone down with it.
 
-- **An `A`/`AAAA` record can own its `PTR`, and keep it in step.** Tick *Keep a
-  matching PTR record in the reverse zone* in the record editor and the panel
-  writes the PTR into whichever reverse zone on this server covers the address.
+- **An `A`/`AAAA` record can own its `PTR`, and keep it in step.** Tick *Also
+  create a matching PTR record* in the record editor and the panel writes the
+  PTR into whichever reverse zone on this server covers the address.
   From then on the reverse side follows the forward record: change the address
   and the PTR moves, rename the record and the PTR answers with the new name,
   add a second address and it gets its own PTR, disable or delete the record

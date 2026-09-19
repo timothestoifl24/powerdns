@@ -8,6 +8,23 @@
     <span class="badge bg-success-lt me-1"><i class="ti ti-lock me-1"></i>DNSSEC</span>
   {% endif %}
   <span class="text-secondary">serial {{ zone.serial | default('—') }}</span>
+  {% if reverse_zones %}
+    <span class="text-secondary">
+      · reverse
+      {% for name in reverse_zones %}
+        <a href="{{ url_for('zones.detail', zone_id=name) }}"
+           class="font-monospace">{{ name.rstrip('.') }}</a>{{ ", " if not loop.last }}
+      {% endfor %}
+    </span>
+  {% elif reverse_sources %}
+    <span class="text-secondary">
+      · reverse zone for
+      {% for name in reverse_sources %}
+        <a href="{{ url_for('zones.detail', zone_id=name) }}"
+           class="font-monospace">{{ name.rstrip('.') }}</a>{{ ", " if not loop.last }}
+      {% endfor %}
+    </span>
+  {% endif %}
 {% endblock %}
 {% block header_actions %}
   <div class="btn-list">
@@ -20,6 +37,9 @@
         Actions
       </button>
       <div class="dropdown-menu dropdown-menu-end">
+        <a class="dropdown-item" href="{{ url_for('zones.settings', zone_id=zone.id) }}">
+          <i class="ti ti-settings me-2"></i>Zone settings
+        </a>
         <a class="dropdown-item" href="{{ url_for('zones.export', zone_id=zone.id) }}">
           <i class="ti ti-download me-2"></i>Export zone file
         </a>
@@ -254,18 +274,32 @@
               {# Address records only: the reverse side of this record. #}
               <div class="col-12 d-none" data-record-when-type="{{ address_types | join(',') }}">
                 <label class="form-check form-switch">
+                  {# Ticked by default when the zone names its reverse zones, so a
+                     linked zone adds the reverse record without being asked twice. #}
                   <input class="form-check-input" type="checkbox" name="sync_ptr"
-                         data-record-field="sync_ptr">
+                         data-record-field="sync_ptr"
+                         data-record-default="{{ '1' if reverse_zones else '' }}"
+                         {{ 'checked' if reverse_zones }}>
                   <span class="form-check-label">
-                    Keep a matching PTR record in the reverse zone
+                    Also create a matching PTR record
                   </span>
                 </label>
                 <small class="form-hint">
-                  The PTR is written into whichever reverse zone on this server covers the
-                  address, and follows this record from then on: change the address, rename
-                  it or delete it and the PTR is updated with it. Unticking this leaves the
-                  record alone and removes the PTR. If no reverse zone covers the address,
-                  the panel says so rather than creating one.
+                  {% if reverse_zones %}
+                    This zone is linked to
+                    {% for name in reverse_zones %}
+                      <code>{{ name.rstrip('.') }}</code>{{ ", " if not loop.last }}
+                    {% endfor %}
+                    — whichever covers the address gets the PTR.
+                  {% else %}
+                    The PTR is written into whichever reverse zone on this server covers the
+                    address. Link one on the
+                    <a href="{{ url_for('zones.settings', zone_id=zone.id) }}">zone settings</a>
+                    page to have this ticked from the start.
+                  {% endif %}
+                  It then follows this record: change the address, rename it or delete it and
+                  the PTR is updated with it. Unticking leaves the record alone and removes
+                  the PTR.
                 </small>
               </div>
             </div>

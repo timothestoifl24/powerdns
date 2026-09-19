@@ -103,7 +103,7 @@ plain environment variable instead of a file — each one accepts both `FOO` and
 ├── webui/
 │   ├── Dockerfile            Tabler vendored at build time, then the Flask app
 │   ├── app/                  the panel
-│   └── tests/                471 tests, incl. an in-memory PowerDNS and recursor
+│   └── tests/                517 tests, incl. an in-memory PowerDNS and recursor
 ├── scripts/generate-secrets.sh
 └── docs/                     the documentation site (VitePress)
 ```
@@ -119,6 +119,24 @@ plain environment variable instead of a file — each one accepts both `FOO` and
 Grants for the `user` role are managed per account under
 **Administration → Users → *(a user)* → Zone access**.
 
+## Zone settings
+
+**Actions → Zone settings** on a zone page configures the zone itself rather
+than the records in it: its kind (and a slave's masters), the apex nameservers,
+the SOA — primary nameserver, **the administrator's email address**, and the
+refresh/retry/expire/negative-TTL timers — and which reverse zones the zone is
+linked to. The address is stored the way DNS wants it, so `first.last@…`
+becomes `first\.last.…` and is shown back to you as an address.
+
+The serial is shown but not editable: PowerDNS bumps it on every change, and a
+serial edited by hand would either be overwritten or stop secondaries
+transferring. A slave zone takes its nameservers and SOA from its master, so
+those fields are not offered for one.
+
+Anyone who can edit a zone's records can use the page — the record editor
+already reaches the same `NS` and `SOA` sets. Changing the kind is reserved for
+operators.
+
 ## Reverse DNS
 
 Both halves of a record are managed together rather than as two chores:
@@ -130,12 +148,18 @@ Both halves of a record are managed together rather than as two chores:
   forward zone with the same kind, nameservers and DNSSEC setting. A network
   spanning several delegation boundaries becomes one zone per boundary.
 
-* **An `A`/`AAAA` record can own its `PTR`.** Tick **Keep a matching PTR record
-  in the reverse zone** in the record editor and the panel writes the PTR into
-  whichever reverse zone covers the address. It then follows the forward
-  record: repoint it, rename it, disable it or delete it and the PTR is updated
-  or removed with it. Untick the box to drop the PTR, and edit the PTR by hand
-  to take it over — the panel then leaves it alone for good.
+* **A zone can be linked to its reverse zones.** Tick them on the zone settings
+  page — or create one from a network there in the same save. A linked zone
+  opens the record editor with the reverse record already ticked and names the
+  zone the `PTR` will go into, and its linked zones are preferred when more
+  than one could take the record.
+
+* **An `A`/`AAAA` record can own its `PTR`.** Tick **Also create a matching PTR
+  record** in the record editor and the panel writes the PTR into whichever
+  reverse zone covers the address. It then follows the forward record: repoint
+  it, rename it, disable it or delete it and the PTR is updated or removed with
+  it. Untick the box to drop the PTR, and edit the PTR by hand to take it over
+  — the panel then leaves it alone for good.
 
 Neither creates anything behind your back: if no reverse zone covers an
 address, the forward record is saved and the panel says so. Zone access applies

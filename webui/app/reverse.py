@@ -7,6 +7,11 @@ behind it need ``in-addr.arpa``/``ip6.arpa`` zones as well, and working out
 that ``192.0.2.0/24`` is ``2.0.192.in-addr.arpa`` by hand is a reliable source
 of typos. :func:`reverse_zones_for_network` does that arithmetic.
 
+*Linked reverse zones.* A forward zone can name the reverse zones its
+records belong in, set on the zone settings page. That pairing is what lets
+the record editor offer a PTR by default and say which zone it will go into,
+instead of searching every zone on the server for one that happens to fit.
+
 *Linked PTR records.* An ``A`` or ``AAAA`` record and its ``PTR`` are two
 records in two zones that have to agree, and in practice they drift: the
 forward record is renamed or repointed and the PTR is forgotten. A link records
@@ -30,7 +35,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import select
 
 from .database import get_session
-from .models import ReverseLink
+from .models import ReverseLink, ZoneReverseLink
 from .pdns import PdnsError, canonical
 
 log = logging.getLogger(__name__)
@@ -239,6 +244,69 @@ def _join(names: Sequence[str]) -> str:
     return ", ".join(name.rstrip(".") for name in names)
 
 
+def linked_reverse_zones(zone: str) -> list[str]:
+    """The reverse zones ``zone``'s records write their PTRs into."""
+    db = get_session()
+    rows = db.scalars(
+        select(ZoneReverseLink.reverse_zone).where(ZoneReverseLink.forward_zone == canonical(zone))
+    )
+    return sorted(rows)
+
+
+def linked_forward_zones(reverse_zone: str) -> list[str]:
+    """The forward zones that send their PTRs to ``reverse_zone``."""
+    db = get_session()
+    rows = db.scalars(
+        select(ZoneReverseLink.forward_zone).where(
+            ZoneReverseLink.reverse_zone == canonical(reverse_zone)
+        )
+    )
+    return sorted(rows)
+
+
+def set_linked_reverse_zones(
+    zone: str, reverse_zones: Iterable[str]
+) -> tuple[list[str], list[str]]:
+    """Make ``zone``'s reverse zone links exactly ``reverse_zones``.
+
+    Returns ``(added, removed)`` so the caller can say what changed. Unlinking
+    touches no records: PTRs already written keep their own links and carry on
+    being kept in step, because where a PTR lives is settled when it is
+    created, not on every save.
+    """
+    db = get_session()
+    zone_c = canonical(zone)
+    wanted = {canonical(item) for item in reverse_zones if canonical(item)}
+    existing = {
+        link.reverse_zone: link
+        for link in db.scalars(
+            select(ZoneReverseLink).where(ZoneReverseLink.forward_zone == zone_c)
+        )
+    }
+
+    added = sorted(wanted - set(existing))
+    removed = sorted(set(existing) - wanted)
+    for name in added:
+        db.add(ZoneReverseLink(forward_zone=zone_c, reverse_zone=name))
+    for name in removed:
+        db.delete(existing[name])
+    db.commit()
+    return added, removed
+
+
+def forget_zone_links(zone: str) -> None:
+    """Drop every zone-level pairing mentioning ``zone``, in either direction."""
+    db = get_session()
+    zone_c = canonical(zone)
+    for link in db.scalars(
+        select(ZoneReverseLink).where(
+            (ZoneReverseLink.forward_zone == zone_c) | (ZoneReverseLink.reverse_zone == zone_c)
+        )
+    ):
+        db.delete(link)
+    db.commit()
+
+
 def links_for_record(zone: str, name: str, rtype: str) -> list[ReverseLink]:
     """Links owned by one forward record set."""
     db = get_session()
@@ -295,8 +363,9 @@ def forget_zone(zone: str) -> None:
     """Drop every link that mentions ``zone``, on either side.
 
     Called after a zone is deleted: its records are gone, and so is anything
-    the panel could still do about them.
+    the panel could still do about them. The zone-level pairings go with it.
     """
+    forget_zone_links(zone)
     db = get_session()
     zone_c = canonical(zone)
     for link in db.scalars(
@@ -333,14 +402,24 @@ def sync_record(
 
     desired: dict[str, tuple[str, str]] = {}  # ptr -> (reverse zone, address)
     if enabled and rtype in ADDRESS_TYPES and addresses:
-        if zone_names is None:
-            zone_names = [entry.get("name", "") for entry in client.list_zones()]
+        # The zone's own reverse zones come first: that pairing is the
+        # operator's statement about where these PTRs belong, and it saves
+        # listing every zone on the server for the common case.
+        preferred = linked_reverse_zones(zone_c)
+        every_zone = list(zone_names) if zone_names is not None else None
+
         for address in addresses:
             try:
                 ptr = ptr_name(address)
             except ReverseError:
                 continue  # Not an address; validation has already said so.
-            reverse_zone = enclosing_zone(ptr, zone_names)
+            reverse_zone = enclosing_zone(ptr, preferred)
+            if reverse_zone is None:
+                # Nothing linked covers this address. Fall back to any reverse
+                # zone on the server, which is what an unlinked zone does.
+                if every_zone is None:
+                    every_zone = [entry.get("name", "") for entry in client.list_zones()]
+                reverse_zone = enclosing_zone(ptr, every_zone)
             if reverse_zone is None:
                 result.no_zone.append(address)
                 continue

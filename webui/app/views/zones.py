@@ -27,8 +27,19 @@ from flask import (
 )
 
 from .. import audit, reverse
-from ..dnsutil import validate_rrset, validate_ttl
+from ..dnsutil import (
+    SOA_DEFAULTS,
+    Soa,
+    email_to_rname,
+    parse_soa,
+    validate_content,
+    validate_email,
+    validate_name,
+    validate_rrset,
+    validate_ttl,
+)
 from ..pdns import (
+    ZONE_KINDS,
     PdnsError,
     absolute_name,
     canonical,
@@ -354,6 +365,9 @@ def detail(zone_id: str):
     linked_ptrs = {
         link.ptr_name: link.forward_name for link in links if link.reverse_zone == zone_name
     }
+    # The zone-level pairing, which decides whether the record editor offers a
+    # reverse record by default and which zone it names.
+    reverse_zones = reverse.linked_reverse_zones(zone_name)
 
     return render_template(
         "zones/detail.html",
@@ -365,7 +379,294 @@ def detail(zone_id: str):
         linked_forward=linked_forward,
         linked_ptrs=linked_ptrs,
         address_types=sorted(reverse.ADDRESS_TYPES),
+        reverse_zones=reverse_zones,
+        reverse_sources=reverse.linked_forward_zones(zone_name),
     )
+
+
+@bp.route("/<path:zone_id>/settings", methods=["GET", "POST"])
+@login_required
+def settings(zone_id: str):
+    """The zone's own configuration, as opposed to the records in it.
+
+    Everything here is stored by PowerDNS as a record or a zone property --
+    nameservers are the apex NS set, the administrator's address is the SOA's
+    RNAME field -- so this page is a friendlier way of editing things that are
+    otherwise hand-written into a record's content. The exception is the list
+    of reverse zones, which is the panel's own pairing.
+    """
+    zone_name = canonical(zone_id)
+    user = require_zone_access(zone_name)
+    client = _client()
+
+    try:
+        zone = client.get_zone(zone_id)
+    except PdnsError as exc:
+        result = _handle_pdns_error(exc, f"loading zone {zone_id}")
+        if result is None:
+            return redirect(url_for("zones.index"))
+        return result
+
+    zone_name = zone.get("name", zone_name)
+    is_slave = (zone.get("kind") or "").lower() == "slave"
+
+    if request.method == "POST":
+        return _save_settings(client, user, zone, zone_id, is_slave=is_slave)
+
+    return render_template(
+        "zones/settings.html",
+        zone=zone,
+        zone_name=zone_name,
+        is_slave=is_slave,
+        form=_settings_form(zone, zone_name),
+        reverse_zones=_selectable_reverse_zones(client, user, zone_name),
+        linked_reverse=reverse.linked_reverse_zones(zone_name),
+        linked_forward=reverse.linked_forward_zones(zone_name),
+        is_reverse=reverse.is_reverse_zone(zone_name),
+        default_ttl=current_app.config["DEFAULT_TTL"],
+    )
+
+
+def _apex(zone: dict, zone_name: str, rtype: str) -> dict | None:
+    """The apex record set of one type, as the API returned it."""
+    for rrset in zone.get("rrsets", []):
+        if canonical(rrset.get("name", "")) == canonical(zone_name) and rrset.get("type") == rtype:
+            return rrset
+    return None
+
+
+def _settings_form(zone: dict, zone_name: str) -> dict:
+    """The current settings, in the shape the form renders."""
+    soa_rrset = _apex(zone, zone_name, "SOA")
+    records = (soa_rrset or {}).get("records") or []
+    soa = parse_soa(records[0].get("content", "")) if records else None
+    ns_rrset = _apex(zone, zone_name, "NS")
+
+    form = {
+        "kind": zone.get("kind", "Native"),
+        "masters": "\n".join(zone.get("masters") or []),
+        "nameservers": "\n".join(
+            record.get("content", "") for record in (ns_rrset or {}).get("records") or []
+        ),
+        "ns_ttl": (ns_rrset or {}).get("ttl", ""),
+        "soa_ttl": (soa_rrset or {}).get("ttl", ""),
+    }
+    if soa is not None:
+        form.update(
+            {
+                "mname": soa.mname,
+                "email": soa.email,
+                "refresh": soa.refresh,
+                "retry": soa.retry,
+                "expire": soa.expire,
+                "minimum": soa.minimum,
+            }
+        )
+    else:
+        form.update(SOA_DEFAULTS)
+    return form
+
+
+def _selectable_reverse_zones(client, user, zone_name: str) -> list[str]:
+    """Reverse zones this user could pair the zone with.
+
+    A zone cannot be its own reverse zone, and a zone the user cannot see is
+    not offered -- picking it would only produce a PTR they are not allowed to
+    write.
+    """
+    try:
+        zones = client.list_zones()
+    except PdnsError as exc:
+        log.warning("could not list zones for the settings page: %s", exc)
+        return []
+    return [
+        name
+        for name in (entry.get("name", "") for entry in zones)
+        if reverse.is_reverse_zone(name)
+        and canonical(name) != canonical(zone_name)
+        and user.can_see_zone(name)
+    ]
+
+
+def _save_settings(client, user, zone: dict, zone_id: str, *, is_slave: bool):
+    zone_name = zone.get("name", canonical(zone_id))
+    form = request.form
+    problems: list[str] = []
+
+    # The kind and its masters decide how the zone is served rather than what
+    # it answers, so they stay with the operators who can create and delete
+    # zones. Everything below is editable by anyone who can edit the records,
+    # because the record editor already reaches the same NS and SOA sets.
+    if user.is_operator:
+        kind = (form.get("kind") or zone.get("kind") or "Native").strip().title()
+        masters = _lines(form.get("masters"))
+    else:
+        kind = (zone.get("kind") or "Native").strip().title()
+        masters = list(zone.get("masters") or [])
+
+    if kind not in ZONE_KINDS:
+        problems.append("Choose a valid zone kind.")
+    if kind == "Slave" and not masters:
+        problems.append("A slave zone needs at least one master address.")
+
+    # A slave's NS and SOA come from its master, so the form does not offer
+    # them and a posted value is ignored rather than written over the transfer.
+    editing_content = kind != "Slave"
+    nameservers = _lines(form.get("nameservers")) if editing_content else []
+    ns_ttl = soa_ttl = current_app.config["DEFAULT_TTL"]
+    soa: Soa | None = None
+
+    if editing_content:
+        if not nameservers:
+            problems.append("Add at least one nameserver, or the zone will not resolve.")
+        for nameserver in nameservers:
+            problem = validate_content("NS", canonical(nameserver))
+            if problem:
+                problems.append(problem)
+
+        ns_ttl, error = validate_ttl(form.get("ns_ttl") or current_app.config["DEFAULT_TTL"])
+        if error:
+            problems.append(f"Nameserver TTL: {error}")
+        soa_ttl, error = validate_ttl(form.get("soa_ttl") or current_app.config["DEFAULT_TTL"])
+        if error:
+            problems.append(f"SOA TTL: {error}")
+
+        email_error = validate_email(form.get("email") or "")
+        if email_error:
+            problems.append(email_error)
+        mname = canonical(form.get("mname") or "")
+        if not mname:
+            problems.append("Enter the primary nameserver for the SOA record.")
+        else:
+            problem = validate_name(mname)
+            if problem:
+                problems.append(problem)
+
+        timers: dict[str, int] = {}
+        for field, label in (
+            ("refresh", "Refresh"),
+            ("retry", "Retry"),
+            ("expire", "Expire"),
+            ("minimum", "Negative TTL"),
+        ):
+            value, error = validate_ttl(form.get(field) or SOA_DEFAULTS[field])
+            if error:
+                problems.append(f"{label}: {error}")
+            timers[field] = value
+
+        if not problems:
+            existing = _apex(zone, zone_name, "SOA")
+            records = (existing or {}).get("records") or []
+            current = parse_soa(records[0].get("content", "")) if records else None
+            soa = Soa(
+                mname=mname,
+                rname=email_to_rname(form.get("email") or ""),
+                # PowerDNS bumps the serial itself on every change, so the
+                # existing value is carried across rather than edited here.
+                serial=current.serial if current else 1,
+                **timers,
+            )
+
+    # Reverse zones: existing ones ticked on the form, plus any the operator
+    # asked to create from a network.
+    wanted_reverse = [canonical(name) for name in form.getlist("reverse_zones")]
+    selectable = {canonical(name) for name in _selectable_reverse_zones(client, user, zone_name)}
+    unknown = [name for name in wanted_reverse if name not in selectable]
+    if unknown:
+        problems.append(
+            f"{', '.join(name.rstrip('.') for name in unknown)} is not a reverse zone "
+            "you can use here."
+        )
+
+    new_reverse: list[str] = []
+    networks = (form.get("reverse_networks") or "").strip()
+    if networks:
+        if not user.is_operator:
+            problems.append("Only an operator can create a new reverse zone.")
+        else:
+            new_reverse, network_problems = reverse.reverse_zones_for_networks(networks)
+            problems.extend(network_problems)
+
+    if problems:
+        flash_errors(problems)
+        return (
+            render_template(
+                "zones/settings.html",
+                zone=zone,
+                zone_name=zone_name,
+                is_slave=is_slave,
+                form=form,
+                reverse_zones=sorted(selectable),
+                linked_reverse=wanted_reverse,
+                linked_forward=reverse.linked_forward_zones(zone_name),
+                is_reverse=reverse.is_reverse_zone(zone_name),
+                default_ttl=current_app.config["DEFAULT_TTL"],
+            ),
+            400,
+        )
+
+    changes: list[str] = []
+    try:
+        if kind != zone.get("kind") or (kind == "Slave" and masters != (zone.get("masters") or [])):
+            update: dict = {"kind": kind}
+            if kind == "Slave":
+                update["masters"] = masters
+            client.update_zone(zone_id, update)
+            changes.append(f"kind={kind}")
+
+        if editing_content:
+            client.replace_rrset(
+                zone_id,
+                name=zone_name,
+                rtype="NS",
+                ttl=ns_ttl,
+                contents=[canonical(nameserver) for nameserver in nameservers],
+                account=user.username,
+            )
+            changes.append(f"nameservers={len(nameservers)}")
+            if soa is not None:
+                client.replace_rrset(
+                    zone_id,
+                    name=zone_name,
+                    rtype="SOA",
+                    ttl=soa_ttl,
+                    contents=[soa.to_content()],
+                    account=user.username,
+                )
+                changes.append("soa")
+    except PdnsError as exc:
+        log.error("could not save settings for %s: %s", zone_id, exc)
+        flash(str(exc), "danger")
+        audit.record("zone.settings", target=zone_name, detail=str(exc), actor=user, success=False)
+        return redirect(url_for("zones.settings", zone_id=zone_id))
+
+    for name in new_reverse:
+        if name in selectable:
+            continue  # Already there; ticking it is enough.
+        _create_reverse_zone(
+            name,
+            forward=zone_name,
+            user=user,
+            kind=kind,
+            nameservers=nameservers,
+            masters=masters,
+            soa_edit_api=current_app.config["DEFAULT_SOA_EDIT_API"],
+            dnssec=bool(zone.get("dnssec")),
+        )
+
+    added, removed = reverse.set_linked_reverse_zones(zone_name, [*wanted_reverse, *new_reverse])
+    if added:
+        changes.append("linked=" + ",".join(name.rstrip(".") for name in added))
+    if removed:
+        changes.append("unlinked=" + ",".join(name.rstrip(".") for name in removed))
+
+    audit.record("zone.settings", target=zone_name, detail=" ".join(changes), actor=user)
+    flash("The zone settings have been saved.", "success")
+    return redirect(url_for("zones.settings", zone_id=zone_id))
+
+
+def _lines(raw: str | None) -> list[str]:
+    return [line.strip() for line in (raw or "").replace(",", "\n").splitlines() if line.strip()]
 
 
 @bp.route("/<path:zone_id>/records", methods=["POST"])

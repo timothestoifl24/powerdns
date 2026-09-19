@@ -215,6 +215,36 @@ class ReverseLink(Base):
         return f"<ReverseLink {self.ptr_name} -> {self.forward_name} {self.forward_type}>"
 
 
+class ZoneReverseLink(Base):
+    """A reverse zone a forward zone's records should write their PTRs into.
+
+    Distinct from :class:`ReverseLink`, which is one PTR record following one
+    A/AAAA record. This is the zone-level pairing an operator sets on the zone
+    settings page: it says *where* those PTRs belong, so the record editor can
+    offer the reverse record by default and name the zone it will go into
+    rather than searching every zone on the server for one that fits.
+    """
+
+    __tablename__ = "zone_reverse_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    #: Canonical, with trailing dots.
+    forward_zone: Mapped[str] = mapped_column(String(255), nullable=False)
+    reverse_zone: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint("forward_zone", "reverse_zone", name="uq_zone_reverse_pair"),
+        Index("ix_zone_reverse_links_forward", "forward_zone"),
+        Index("ix_zone_reverse_links_reverse", "reverse_zone"),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"<ZoneReverseLink {self.forward_zone} -> {self.reverse_zone}>"
+
+
 class AuditLog(Base):
     """Append-only record of every change made through the panel."""
 
@@ -339,6 +369,7 @@ __all__ = [
     "ReverseLink",
     "User",
     "ZoneAccess",
+    "ZoneReverseLink",
     "ROLE_ADMIN",
     "ROLE_OPERATOR",
     "ROLE_USER",

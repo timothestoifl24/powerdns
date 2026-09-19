@@ -47,9 +47,14 @@ features:
     linkText: Set up forwarding
   - icon: 🔁
     title: Reverse DNS that keeps itself honest
-    details: Create a zone together with the in-addr.arpa/ip6.arpa zones for its networks, and give an A or AAAA record a PTR that follows it — repointed, renamed, disabled or deleted, the reverse side keeps up.
+    details: Create a zone together with the in-addr.arpa/ip6.arpa zones for its networks, link them on the zone settings page, and give an A or AAAA record a PTR that follows it — repointed, renamed, disabled or deleted, the reverse side keeps up.
     link: /guide#linked-ptr-records
     linkText: Linking a PTR
+  - icon: ⚙️
+    title: The zone itself, not just its records
+    details: Nameservers, the administrator's address and the SOA timers on one settings page, stored as the records DNS expects — with the serial left to PowerDNS, where it belongs.
+    link: /guide#zone-settings
+    linkText: Zone settings
   - icon: 🔏
     title: DNSSEC without the ceremony
     details: Enable signing on a zone and a combined signing key is created for you. The DS records to hand your registrar are shown ready to copy.

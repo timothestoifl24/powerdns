@@ -104,6 +104,38 @@ everyone with `DEFAULT_NAMESERVERS` in `.env`.
 
 Ticking **Enable DNSSEC** on the form signs the zone from the start.
 
+### Creating the reverse zone with it
+
+Tick **Also create the reverse zone for this zone's networks** and give the
+networks in CIDR notation, one per line. Each becomes an `in-addr.arpa` or
+`ip6.arpa` zone created alongside the forward one, with the same kind,
+nameservers and DNSSEC setting:
+
+| Network | Zone |
+| --- | --- |
+| `192.0.2.0/24` | `2.0.192.in-addr.arpa` |
+| `10.0.0.0/16` | `0.10.in-addr.arpa` |
+| `203.0.113.0/23` | `112.0.203.in-addr.arpa` **and** `113.0.203.in-addr.arpa` |
+| `198.51.100.64/26` | `100.51.198.in-addr.arpa` |
+| `2001:db8::/48` | `0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa` |
+
+Reverse delegation happens on whole octets (IPv4) or whole nibbles (IPv6), so a
+prefix that does not land on one is rounded to those that do. A network
+*shorter* than a boundary becomes every zone it spans — a /23 is two /24s. A
+network *longer* than one becomes the zone it sits inside: a /26 has no reverse
+zone of its own without [RFC 2317](https://www.rfc-editor.org/rfc/rfc2317)
+delegation, which is an arrangement with whoever delegates the /24 rather than
+something the panel can infer, so the /24 is what gets created. The same
+applies to IPv6 below a /64.
+
+A network that would need more than 16 zones is refused rather than expanded,
+on the grounds that it is far more likely to be a mistyped prefix than a
+request for 32 zones.
+
+The reverse zones are created after the forward one. If one of them fails —
+most often because it already exists — the forward zone is still created and
+the panel says which reverse zone it could not make.
+
 ### Editing records
 
 The zone page lists record *sets* — every record sharing one name and type,
@@ -129,10 +161,54 @@ Things worth knowing:
 - **Comments** (up to 512 characters) are stored with the record set through the
   API, so they live in the database rather than only in the UI.
 
+### Linked PTR records
+
+An `A` or `AAAA` record can own its reverse record. Tick **Keep a matching PTR
+record in the reverse zone** in the record editor and the panel writes the PTR
+into whichever reverse zone on this server covers the address, pointing back at
+the record's name.
+
+The two then stay in step. Every later change to the forward record is carried
+across:
+
+| Change to the address record | What happens to the PTR |
+| --- | --- |
+| The address changes | The old PTR goes, a new one is written |
+| The record is renamed | The PTR answers with the new name |
+| A second address is added | It gets a PTR of its own |
+| The record is disabled | The PTR is removed — a disabled record answers nothing |
+| The record is deleted | The PTR is deleted with it |
+| The box is unticked | The PTR is removed, the address record is untouched |
+
+Linked records are marked on the zone page: a **PTR** badge on the forward
+record, a **linked** badge on the PTR.
+
+Things worth knowing:
+
+- **The reverse zone has to exist.** The panel does not create one behind your
+  back; if no zone covers the address it saves the forward record and says so.
+  Create the reverse zone — the new-zone form does it in one step — and save
+  the record again.
+- **Zone access applies to both ends.** A user granted the forward zone but not
+  the reverse one gets their record saved and a note that the PTR was left
+  alone. Operators and admins have both.
+- **One PTR, one owner.** An address has one reverse answer, so pointing a
+  second record at an address already linked takes the PTR over, and the panel
+  says so rather than leaving you to find out from a `dig`.
+- **Editing a PTR by hand ends the link.** Point it somewhere else and it
+  becomes yours: the panel stops updating it, and will not delete it when the
+  forward record goes. Nothing is reverted behind you.
+- **The link is panel metadata**, kept in the panel's own schema. Both records
+  live in PowerDNS and are written through the API like every other change, so
+  losing the link would leave DNS exactly as it is — it would only stop the
+  pair being kept in step.
+
 ### Deleting a zone
 
 Deleting a zone removes every record in it, so the panel makes you type the zone
-name to confirm. Only operators and admins can do it.
+name to confirm. Only operators and admins can do it. Any PTR links through
+that zone are forgotten with it, on either side: the records are gone, and so
+is anything the panel could do about them.
 
 ### Export, notify, retrieve
 
@@ -359,7 +435,16 @@ Four properties are worth knowing:
 - **Test contacts the provider straight away** — binding to the directory,
   reading the OIDC discovery document, or fetching the IdP metadata. A new
   provider gets verified without asking someone to attempt a sign-in and
-  interpret the failure.
+  interpret the failure. For a directory with more than one server it also
+  names the one that answered, so a successful test against the second means
+  the first is down.
+- **An LDAP provider takes more than one server.** The *Server URIs* field is
+  one URI per line (`LDAP_URI` takes the same list, comma separated). They are
+  tried in order — a preference, not load balancing — and the first that
+  answers handles the sign-in; one that cannot be reached is skipped for a
+  minute and rejoins on its own. Search and password bind always go to the same
+  server, so a lagging replica cannot reject an account the other just
+  returned.
 - **Configuration is validated on save**, not at sign-in. A provider missing its
   token URL, base DN or IdP certificate is refused with the reason.
 - **Secrets are encrypted before they are stored**, with a key derived from

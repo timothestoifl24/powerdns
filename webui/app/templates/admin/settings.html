@@ -124,7 +124,12 @@
               <div class="col">
                 <div class="fw-medium">LDAP / Active Directory</div>
                 {% if auth.ldap.enabled %}
-                  <div class="text-secondary small font-monospace">{{ auth.ldap.uri }}</div>
+                  {# One line per server: several means failover, in order. #}
+                  {% for uri in auth.ldap.uris %}
+                    <div class="text-secondary small font-monospace">{{ uri }}{%
+                      if not loop.first %} <span class="badge bg-secondary-lt">failover</span>{%
+                      endif %}</div>
+                  {% endfor %}
                   <div class="text-secondary small">
                     base {{ auth.ldap.base_dn }} · attribute {{ auth.ldap.username_attribute }}
                   </div>

@@ -140,6 +140,27 @@ The panel binds as the service account to find the user, then binds **as that
 user** to check the password — it never reads a password hash, and the service
 account needs nothing more than read access to the directory.
 
+#### More than one server
+
+`LDAP_URI` takes a list, separated by commas, for a directory published by
+several domain controllers:
+
+```bash
+LDAP_URI=ldaps://dc1.example.com:636,ldaps://dc2.example.com:636
+```
+
+The servers are tried in order — the list is a preference, not load balancing —
+and the first that answers handles the sign-in. One that fails to connect is
+left out of the rotation for a minute, so a dead server costs one connect
+timeout rather than one per attempt, and it rejoins by itself when it
+recovers. Both the search and the password bind go to the same server, so a
+replica lagging behind cannot reject an account the other one just returned.
+
+In the web UI the same field is a textarea: one URI per line.
+
+`ldaps://` and plain `ldap://` entries can be mixed; StartTLS is negotiated
+only on the ones that need it.
+
 Other settings: `LDAP_START_TLS`, `LDAP_TLS_VERIFY`, `LDAP_CA_CERT_FILE`,
 `LDAP_EMAIL_ATTRIBUTE`, `LDAP_DISPLAY_NAME_ATTRIBUTE`, `LDAP_GROUP_ATTRIBUTE`,
 `LDAP_GROUP_SEARCH_BASE`, `LDAP_GROUP_FILTER`, `LDAP_CONNECT_TIMEOUT`, and

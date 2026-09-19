@@ -12,6 +12,66 @@ from their labels. Upgrade instructions live in
 
 ## [Unreleased]
 
+Everything here is additive: no setting changes meaning, and a stack that
+pulls without ticking any of the new boxes behaves exactly as it did. The
+panel creates one table of its own, `reverse_links`, on start-up.
+
+### Added
+
+- **A zone can be created together with its reverse zones.** Tick *Also create
+  the reverse zone for this zone's networks* on the new-zone form and give the
+  networks in CIDR notation, one per line. Each becomes an `in-addr.arpa` or
+  `ip6.arpa` zone created alongside the forward one, with the same kind,
+  nameservers and DNSSEC setting — `192.0.2.0/24` is `2.0.192.in-addr.arpa`,
+  `2001:db8::/48` is `0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa`.
+
+  Reverse delegation lands on whole octets (IPv4) or nibbles (IPv6), so a
+  prefix that does not is resolved to the ones that do: a /23 becomes the two
+  /24s it spans, while a /26 becomes the /24 it sits inside, because a /26 has
+  no reverse zone of its own without RFC 2317 delegation — an arrangement with
+  whoever delegates the /24 rather than something to infer from a prefix. A
+  network needing more than 16 zones is refused rather than expanded, on the
+  grounds that it is far likelier to be a typo than a request. A mistyped
+  network is a form error, so nothing is created; a reverse zone that fails on
+  its own (usually because it already exists) is reported without taking the
+  forward zone down with it.
+
+- **An `A`/`AAAA` record can own its `PTR`, and keep it in step.** Tick *Keep a
+  matching PTR record in the reverse zone* in the record editor and the panel
+  writes the PTR into whichever reverse zone on this server covers the address.
+  From then on the reverse side follows the forward record: change the address
+  and the PTR moves, rename the record and the PTR answers with the new name,
+  add a second address and it gets its own PTR, disable or delete the record
+  and the PTR goes with it. Unticking the box removes the PTR and leaves the
+  address record alone. Both ends are marked on the zone page.
+
+  Nothing is created behind your back: if no reverse zone covers the address,
+  the forward record is saved and the panel says which zone is missing. Zone
+  access applies to both ends — a user granted the forward zone but not the
+  reverse one gets their record saved and a note that the PTR was left alone,
+  rather than a refusal. An address has one reverse answer, so pointing a
+  second record at a linked address takes the PTR over and says so. Editing a
+  PTR by hand ends the link: it becomes yours, and the panel neither updates
+  nor deletes it afterwards.
+
+  The link is panel metadata in the panel's own schema. Both records live in
+  PowerDNS and are written through its API like every other change, so losing
+  the links would leave DNS exactly as it is and only stop the pairs being kept
+  in step.
+
+- **LDAP accepts more than one server, for failover.** `LDAP_URI` takes a list
+  separated by commas, and the *Server URIs* field in the web UI is one per
+  line. They are tried in order — the list is a preference, not load balancing
+  — and the first that answers handles the sign-in. A server that cannot be
+  reached is left out for a minute rather than retried on every attempt, and
+  rejoins by itself when it recovers, so a dead domain controller costs one
+  connect timeout instead of one per sign-in. The search and the password bind
+  always go to the same server, so a replica that has not caught up cannot
+  reject an account the other one just returned. `ldaps://` and `ldap://`
+  entries can be mixed: StartTLS is negotiated only where it is needed. A
+  single URI behaves exactly as before, and *Test* now names the server that
+  answered.
+
 ## [1.1.0] — 2026-09-19
 
 Moves the database to PostgreSQL 18, which existing deployments cannot take by

@@ -172,6 +172,49 @@ class ZoneAccess(Base):
     __table_args__ = (UniqueConstraint("user_id", "zone", name="uq_zone_access_user_zone"),)
 
 
+class ReverseLink(Base):
+    """A PTR record the panel maintains on behalf of a forward A/AAAA record.
+
+    One row per PTR name -- a PTR has one answer, so it has one owner. The row
+    holds no DNS data of its own: both records live in PowerDNS, and this only
+    remembers which forward record the panel should follow when the PTR needs
+    updating. Deleting a row leaves both records exactly as they are and simply
+    stops them being kept in step.
+    """
+
+    __tablename__ = "reverse_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    #: The forward side, canonical with trailing dots.
+    forward_zone: Mapped[str] = mapped_column(String(255), nullable=False)
+    forward_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    #: A or AAAA.
+    forward_type: Mapped[str] = mapped_column(String(10), nullable=False, default="A")
+    #: The address this PTR is for, as written in the forward record.
+    address: Mapped[str] = mapped_column(String(45), nullable=False, default="")
+
+    #: The reverse side. ``ptr_name`` is unique: two forward records claiming
+    #: the same address cannot both be answered for.
+    reverse_zone: Mapped[str] = mapped_column(String(255), nullable=False)
+    ptr_name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    __table_args__ = (
+        Index("ix_reverse_links_forward", "forward_zone", "forward_name", "forward_type"),
+        Index("ix_reverse_links_reverse_zone", "reverse_zone"),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"<ReverseLink {self.ptr_name} -> {self.forward_name} {self.forward_type}>"
+
+
 class AuditLog(Base):
     """Append-only record of every change made through the panel."""
 
@@ -293,6 +336,7 @@ __all__ = [
     "AuditLog",
     "AuthProviderConfig",
     "Base",
+    "ReverseLink",
     "User",
     "ZoneAccess",
     "ROLE_ADMIN",

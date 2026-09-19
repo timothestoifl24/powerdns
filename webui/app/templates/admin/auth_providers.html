@@ -51,7 +51,9 @@
             <tr class="bg-body-tertiary">
               <td>
                 <div class="fw-medium">LDAP <span class="text-secondary">(environment)</span></div>
-                <div class="text-secondary small font-monospace">{{ env.ldap.uri }}</div>
+                {% for uri in env.ldap.uris %}
+                  <div class="text-secondary small font-monospace">{{ uri }}</div>
+                {% endfor %}
               </td>
               <td>{{ kind_labels['ldap'] }}</td>
               <td><span class="badge bg-green-lt">Active</span></td>

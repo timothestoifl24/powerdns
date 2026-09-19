@@ -103,7 +103,7 @@ plain environment variable instead of a file — each one accepts both `FOO` and
 ├── webui/
 │   ├── Dockerfile            Tabler vendored at build time, then the Flask app
 │   ├── app/                  the panel
-│   └── tests/                403 tests, incl. an in-memory PowerDNS and recursor
+│   └── tests/                471 tests, incl. an in-memory PowerDNS and recursor
 ├── scripts/generate-secrets.sh
 └── docs/                     the documentation site (VitePress)
 ```
@@ -118,6 +118,34 @@ plain environment variable instead of a file — each one accepts both `FOO` and
 
 Grants for the `user` role are managed per account under
 **Administration → Users → *(a user)* → Zone access**.
+
+## Reverse DNS
+
+Both halves of a record are managed together rather than as two chores:
+
+* **A zone can be created with its reverse zones.** Tick the box on the
+  new-zone form and give the networks in CIDR notation — `192.0.2.0/24` becomes
+  `2.0.192.in-addr.arpa`, `2001:db8::/48` becomes
+  `0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa` — and they are created alongside the
+  forward zone with the same kind, nameservers and DNSSEC setting. A network
+  spanning several delegation boundaries becomes one zone per boundary.
+
+* **An `A`/`AAAA` record can own its `PTR`.** Tick **Keep a matching PTR record
+  in the reverse zone** in the record editor and the panel writes the PTR into
+  whichever reverse zone covers the address. It then follows the forward
+  record: repoint it, rename it, disable it or delete it and the PTR is updated
+  or removed with it. Untick the box to drop the PTR, and edit the PTR by hand
+  to take it over — the panel then leaves it alone for good.
+
+Neither creates anything behind your back: if no reverse zone covers an
+address, the forward record is saved and the panel says so. Zone access applies
+to both ends, so a user granted only the forward zone is told the PTR was left
+alone rather than being refused the save. The link itself is panel metadata —
+both records live in PowerDNS and are written through its API like every other
+change.
+
+The [guide](https://powerdns.stoifl.app/guide#linked-ptr-records) has the full
+table of what happens on each kind of change.
 
 ## Authentication
 
@@ -188,6 +216,19 @@ The panel binds as the service account to find the user, then binds as that
 user to check the password — it never reads a password hash. Group names may be
 given bare (`DNS-Admins`) or as a full DN; `memberOf` values are matched either
 way, case-insensitively.
+
+For failover, give `LDAP_URI` several servers separated by commas:
+
+```bash
+LDAP_URI=ldaps://dc1.example.com:636,ldaps://dc2.example.com:636
+```
+
+They are tried in order, so the preferred domain controller goes first; the
+next one is used when it cannot be reached. A server that fails to answer is
+skipped for a minute rather than retried on every sign-in, and picked up again
+on its own once it is back. The user is always authenticated against the same
+server that answered the search, so a replica that has not caught up cannot
+reject a password for an account it has not seen yet.
 
 ### OAuth 2.0 / OpenID Connect
 

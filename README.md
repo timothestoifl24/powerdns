@@ -611,6 +611,15 @@ container always serves on 53 internally; `DNS_PORT` only affects the host
 side. `DNS_PORT` is the recursor, which is the front door; the authoritative
 server has its own `AUTH_DNS_PORT` and is unpublished by default.
 
+**On Podman, set `DNS_BIND_ADDRESS` to a real address rather than doing either
+of those.** Podman resolves container names with aardvark-dns, which binds port
+53 on the bridge address (`172.29.0.1` here). `0.0.0.0:53` takes that address
+too, so the recursor and aardvark-dns cannot both run: with `systemd-resolved`
+up you get the bind error above, and with it stopped you get a stack that
+starts but cannot resolve `db`. Naming an address avoids both, and lets the
+resolver stay running. See
+[the Podman section in setup](https://powerdns.stoifl.app/setup#podman-bind-an-address-never-0-0-0-0).
+
 **A zone resolves on the authoritative server but not through the recursor.**
 The recursor needs a forward rule pointing at the authoritative server for each
 zone this stack hosts. Compare the two:

@@ -94,12 +94,17 @@ class TestFailure:
         def refuse(*args, **kwargs):
             raise LDAPSocketOpenError("connection refused")
 
+        settings = config()
         monkeypatch.setattr(ldap_auth, "Connection", refuse)
         with pytest.raises(LdapAuthError) as caught:
-            ldap_auth.authenticate(config(), "jdoe", "hunter2hunter2")
-        message = str(caught.value)
-        assert "ldaps://dc1.example.com" in message
-        assert "ldaps://dc2.example.com" in message
+            ldap_auth.authenticate(settings, "jdoe", "hunter2hunter2")
+        # The whole message, not a substring of it: both servers have to be
+        # named, in the configured order, so the operator knows the failure is
+        # the directory being unreachable rather than one host being down.
+        expected = " or ".join(settings.uris)
+        assert (
+            str(caught.value) == f"Cannot reach the LDAP server at {expected}: connection refused"
+        )
 
 
 class TestProviderForm:

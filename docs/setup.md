@@ -169,6 +169,61 @@ The container always serves on 53 internally; `DNS_PORT` only affects the host
 side. For a nameserver that the outside world will query, 53 is not optional —
 free it properly rather than remapping.
 
+### Podman: bind an address, never `0.0.0.0`
+
+On Podman there is a second listener on port 53, and it is not optional: it is
+how your containers resolve each other. Podman's network stack runs
+**aardvark-dns**, which is what makes `db` a name the panel and PowerDNS can
+look up, and it binds port 53 **on the bridge's own address** — `172.29.0.1`
+for this stack's `backend` network. The port is netavark's `dns_bind_port`,
+which defaults to 53.
+
+`DNS_BIND_ADDRESS=0.0.0.0` claims port 53 on *every* address the host has,
+including that one. So the two cannot both start, and which one loses depends
+on the order:
+
+- **With `systemd-resolved` running**, `127.0.0.53:53` is already taken and the
+  recursor simply fails to publish — the error above.
+- **With `systemd-resolved` stopped**, the recursor binds `0.0.0.0:53`
+  successfully, takes `172.29.0.1:53` along with everything else, and
+  aardvark-dns cannot start. The stack comes up and then the panel cannot
+  resolve `db`.
+
+That second failure is the confusing one, because stopping the resolver looks
+like it fixed the first problem when it has really traded it for a worse one.
+
+Name the address instead:
+
+```bash
+# .env — the host address clients will query, not 0.0.0.0
+DNS_BIND_ADDRESS=192.168.1.50
+DNS_PORT=53
+```
+
+`systemd-resolved` can stay exactly as it is: `127.0.0.53:53` is a different
+address, and so is the bridge. Check who holds what:
+
+```bash
+sudo ss -tulpn | grep ':53'
+```
+
+A healthy Podman host shows aardvark-dns on `172.29.0.1:53`, the recursor on
+the address you named, and `systemd-resolved` on `127.0.0.53:53`.
+
+If you genuinely need every interface, move aardvark-dns instead — in
+`/etc/containers/containers.conf`:
+
+```toml
+[network]
+dns_bind_port = 5533
+```
+
+then recreate the network so it takes effect. That is the more invasive
+option, and it still leaves you needing `DNSStubListener=no`.
+
+Docker is unaffected: its embedded DNS answers on `127.0.0.11` *inside* each
+container's network namespace, so it never competes for a host address.
+
 `DNS_PORT` publishes the **recursor**, which is the front door: it answers for
 your zones and forwards everything else. The authoritative server sits behind
 it and is unpublished by default; `AUTH_DNS_PORT=5300` exposes it as well, which

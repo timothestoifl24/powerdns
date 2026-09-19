@@ -58,6 +58,20 @@ A new stack is unaffected — `docker compose up -d --build` just starts on 18.
 
 ### Fixed
 
+- **Podman's own DNS no longer collides with the recursor.** Documented, not
+  changed in code: Podman resolves container names with aardvark-dns, which
+  binds port 53 on the bridge address (`172.29.0.1` for the `backend`
+  network). The default `DNS_BIND_ADDRESS=0.0.0.0` claims port 53 on every
+  address including that one, so the two cannot both start — with
+  `systemd-resolved` running the recursor fails to publish, and with it
+  stopped the recursor wins and aardvark-dns loses, leaving a stack that comes
+  up but cannot resolve `db`. That second failure looks like stopping the
+  resolver caused it, which is why it was worth writing down. Naming a real
+  address for `DNS_BIND_ADDRESS` avoids both and lets `systemd-resolved` stay
+  running; `setup.md` also covers moving aardvark-dns with
+  `dns_bind_port`. The default stays `0.0.0.0`, which is correct on Docker —
+  its embedded DNS answers inside the container namespace and never competes
+  for a host address.
 - **The images build under Podman.** Every `FROM` now names its registry in
   full (`docker.io/library/…`). Podman has no implicit `docker.io`, so on a host
   without `unqualified-search-registries` in `/etc/containers/registries.conf`

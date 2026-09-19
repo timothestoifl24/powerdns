@@ -24,6 +24,31 @@ dig @127.0.0.1 -p 5353 example.com SOA
 `/etc/systemd/resolved.conf` and restarting `systemd-resolved`. For a nameserver
 the outside world will query, 53 is not optional.
 
+On **Podman**, do neither of those first — set `DNS_BIND_ADDRESS` to a real
+address instead. Podman's aardvark-dns also wants port 53, on the bridge
+address, and that is what resolves `db` for your containers. See
+[the Podman section in setup](/setup#podman-bind-an-address-never-0-0-0-0).
+
+### Podman: the containers cannot resolve `db`
+
+Symptoms like `could not translate host name "db" to address` after stopping
+`systemd-resolved` to free port 53. Stopping the resolver let the recursor bind
+`0.0.0.0:53`, which includes the bridge address `172.29.0.1` — the address
+aardvark-dns needs in order to answer container names. It could not start, so
+`db` stopped resolving.
+
+Start `systemd-resolved` again and name an address for the recursor:
+
+```bash
+sudo systemctl start systemd-resolved
+echo 'DNS_BIND_ADDRESS=192.168.1.50' >> .env   # your host's address
+podman compose up -d
+sudo ss -tulpn | grep ':53'                    # aardvark on 172.29.0.1:53
+```
+
+The full explanation, and the alternative of moving aardvark-dns off 53, is in
+[setup](/setup#podman-bind-an-address-never-0-0-0-0).
+
 ### Login appears to succeed, then bounces back to the sign-in page
 
 `SESSION_COOKIE_SECURE=true` over plain HTTP. A secure cookie is never sent back

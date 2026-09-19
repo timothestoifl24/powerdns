@@ -254,9 +254,11 @@ gets there in one step — and destroys all DNS data.
 
 ## Upgrading PostgreSQL
 
-A major version bump (17 → 18) cannot be done by changing the tag: PostgreSQL
-will not start against a data directory written by an older major version. Dump
-and restore instead:
+A major version bump cannot be done by changing the tag: PostgreSQL will not
+start against a data directory written by an older major version. Dump and
+restore instead — and for 17 → 18 specifically, read
+[the section below](#upgrading-to-postgresql-18) first, because the mount point
+moves as well.
 
 ```bash
 docker compose exec -T db pg_dumpall -U postgres > all-$(date +%F).sql
@@ -267,7 +269,121 @@ docker compose exec -T db psql -U postgres -d postgres < all-2026-08-30.sql
 docker compose up -d
 ```
 
-Minor updates (17.4 → 17.5) are just a rebuild and restart.
+Minor updates (18.1 → 18.2) are just a rebuild and restart.
+
+## Upgrading to PostgreSQL 18
+
+The `db` image moved from `postgres:17-alpine` to `postgres:18-alpine`. Two
+things change, and neither happens on its own:
+
+1. **The data directory is a major version older than the server**, which
+   PostgreSQL refuses to start against. It has to be dumped and reloaded.
+2. **The volume is mounted somewhere else.** PostgreSQL 18's official image
+   keeps the cluster in `/var/lib/postgresql/18/docker` and declares
+   `/var/lib/postgresql` — the parent — as its volume, matching the layout
+   `pg_ctlcluster` uses. `compose.yml` now mounts `pgdata` there instead of at
+   `/var/lib/postgresql/data`.
+
+::: warning The container will not start half-upgraded
+Pulling the new image while the old mount is still in place does not quietly
+create an empty database beside your data. The 18 entrypoint looks for a
+cluster at the old path and at `/var/lib/postgresql/*/docker`, and exits with
+*in 18+, these Docker images are configured to store database data in a format
+which is compatible with "pg_ctlcluster"* if it finds one, or if
+`/var/lib/postgresql/data` is a mount point it is not using. That error means
+your data is intact and waiting — it is the upgrade below that has not been
+done yet.
+:::
+
+Take the dump **before** pulling, while 17 is still running:
+
+```bash
+# 1. Still on 17. pg_dumpall, not pg_dump: it carries the roles as well as
+#    the pdns database, and both application roles have to come back.
+git stash        # or check out the previous tag, if you have already pulled
+docker compose up -d db
+docker compose exec -T db pg_dumpall -U postgres > all-$(date +%F).sql
+```
+
+Check that the dump is not empty and contains both schemas before going any
+further — the next step deletes the volume:
+
+```bash
+grep -c 'CREATE TABLE' all-$(date +%F).sql          # expect dozens, not 0
+grep -E 'CREATE (ROLE|SCHEMA)' all-$(date +%F).sql  # pdns, pdnsadmin
+```
+
+Then replace the volume and reload:
+
+```bash
+# 2. Delete the 17 volume and build the 18 image. `down -v` is the destructive
+#    step; the dump above is what makes it safe.
+git stash pop    # or pull this version
+docker compose down -v
+docker compose up -d --build db
+
+# 3. Reload. The initdb scripts have already run against the empty 18 cluster
+#    and created both roles; the dump recreates them, which prints a few
+#    "role already exists" errors that are expected and harmless.
+docker compose exec -T db psql -U postgres -d postgres < all-2026-08-30.sql
+
+# 4. Everything else back up.
+docker compose up -d --build
+```
+
+Verify before you call it done:
+
+```bash
+docker compose exec -T db psql -U postgres -tAc 'SHOW server_version'
+docker compose exec -T db psql -U postgres -d pdns -c '\dt'
+curl -s http://localhost:9191/readyz
+dig @127.0.0.1 example.com SOA +short
+```
+
+`server_version` should say 18.x, `\dt` should list the PowerDNS tables, and
+`readyz` should return `{"database": true, "powerdns": true}`. The roles are
+still unprivileged — worth confirming, since a restore is exactly the moment
+ownership can end up wrong:
+
+```bash
+docker compose exec -T db psql -U postgres -d pdns -c \
+  "SELECT rolname, rolsuper FROM pg_roles WHERE rolname IN ('pdns','pdnsadmin')"
+```
+
+Both rows should read `f`.
+
+### If you would rather not reload yet
+
+Nothing forces the upgrade on a running stack: the image and the mount point
+both come from this repository, so staying on the previous release keeps you on
+PostgreSQL 17 with no dump to take.
+
+```bash
+git checkout <the-tag-before-this-one>
+docker compose up -d --build
+```
+
+Or, if you pull published images rather than building, pin the `db` service to
+a tag from before this release:
+
+```yaml
+services:
+  db:
+    image: ghcr.io/timothestoifl24/pdns-db:<earlier-version>
+```
+
+That is a deferral, not a decision: PostgreSQL 17 stops receiving fixes in
+November 2029, and the pinned `pdns-db` image stays on whatever 17.x it was
+built with, so it stops collecting PostgreSQL's own security updates as soon as
+the tag stops being rebuilt.
+
+### Rolling back to 17
+
+The 18 dump does not reload into 17: `pg_dumpall` writes for the version it ran
+on, and a restore into an older server fails on syntax it does not know. Rolling
+back means the 17 dump you took in step 1, restored into a 17 stack — which is
+the argument for keeping that file until the upgrade has proven itself, not
+deleting it once the new stack comes up.
 
 ## Rotating secrets
 

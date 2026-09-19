@@ -18,8 +18,8 @@ all happens in the images.
 
 ::: tip Podman and short image names
 Every `FROM` in this repository names its registry in full
-(`docker.io/library/postgres:17-alpine`). Podman, unlike Docker, has no implicit
-`docker.io`, so a bare `postgres:17-alpine` fails with *short-name … did not
+(`docker.io/library/postgres:18-alpine`). Podman, unlike Docker, has no implicit
+`docker.io`, so a bare `postgres:18-alpine` fails with *short-name … did not
 resolve to an alias and no unqualified-search registries are defined* unless the
 host sets `unqualified-search-registries` in `/etc/containers/registries.conf`.
 Keep the registry in place if you swap a base image for one of your own.

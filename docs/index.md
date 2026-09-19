@@ -22,7 +22,7 @@ hero:
 features:
   - icon: 📦
     title: Four services, one file
-    details: A PostgreSQL 17 database, PowerDNS Authoritative 4.9, PowerDNS Recursor and the Flask panel. Health-gated start-up order, secrets as files, no manual schema loading.
+    details: A PostgreSQL 18 database, PowerDNS Authoritative 4.9, PowerDNS Recursor and the Flask panel. Health-gated start-up order, secrets as files, no manual schema loading.
     link: /setup
     linkText: Quick start
   - icon: 🔌

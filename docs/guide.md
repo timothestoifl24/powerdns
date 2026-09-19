@@ -14,7 +14,7 @@ Three containers, started by one compose file:
 
 | Service | Built from | What it does |
 | --- | --- | --- |
-| `db` | `postgres:17-alpine` | Holds both halves of the data: PowerDNS's zone tables in `public`, the panel's own tables in the `pdnsadmin` schema. Each half has its own [unprivileged role](#no-application-role-is-a-superuser). |
+| `db` | `postgres:18-alpine` | Holds both halves of the data: PowerDNS's zone tables in `public`, the panel's own tables in the `pdnsadmin` schema. Each half has its own [unprivileged role](#no-application-role-is-a-superuser). |
 | `pdns` | Debian trixie + `pdns-server`, `pdns-backend-pgsql` | PowerDNS Authoritative 4.9, serving DNS on port 53 and its HTTP API on 8081. |
 | `webui` | `python:3.13-slim` + Flask + gunicorn | The admin panel, on port 8080 in the container and 9191 on the host. |
 
@@ -43,7 +43,7 @@ schema is loaded.
        └───────────────────┬──────────────────────────┘ (domains, records)
                            ▼
                     ┌──────────────┐
-                    │      db      │  PostgreSQL 17
+                    │      db      │  PostgreSQL 18
                     └──────────────┘
 ```
 

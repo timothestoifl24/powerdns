@@ -31,7 +31,14 @@ services:
       WEBUI_DB_PASSWORD_FILE: /run/secrets/webui_db_password
       WEBUI_DB_SCHEMA: ${WEBUI_DB_SCHEMA:-pdnsadmin}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # /var/lib/postgresql, not /var/lib/postgresql/data: PostgreSQL 18 keeps
+      # the cluster one level down, in /var/lib/postgresql/18/docker, and
+      # declares the parent as the volume. Mounting the parent is what lets a
+      # future pg_upgrade see the old and the new cluster side by side. The 18
+      # entrypoint refuses to start against a volume still mounted at the old
+      # path rather than silently initialising an empty database next to it --
+      # if you are coming from 17, see docs/upgrading.md.
+      - pgdata:/var/lib/postgresql
     secrets:
       - db_superuser_password
       - pdns_db_password

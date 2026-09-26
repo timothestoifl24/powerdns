@@ -1,0 +1,143 @@
+# PowerDNS Recursor: the front door on :53.
+#
+# It answers for the zones this stack hosts by forwarding them to the pdns
+# Service, and sends everything else wherever the panel's Forwarding page says.
+# Forward zones created through its API are written to a volume and read back
+# at start, so it keeps one -- and, the volume being ReadWriteOnce, runs as a
+# single replica that is replaced rather than rolled.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: recursor-api
+  labels:
+    app.kubernetes.io/name: recursor
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 64Mi
+---
+# The recursor's HTTP API, for the panel. Cluster-internal only.
+apiVersion: v1
+kind: Service
+metadata:
+  name: recursor
+  labels:
+    app.kubernetes.io/name: recursor
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: recursor
+  ports:
+    - name: api
+      port: 8082
+      targetPort: api
+      protocol: TCP
+---
+# DNS for clients. A LoadBalancer by default; see docs/kubernetes.md for
+# NodePort, hostPort and MetalLB alternatives on clusters without one.
+apiVersion: v1
+kind: Service
+metadata:
+  name: recursor-dns
+  labels:
+    app.kubernetes.io/name: recursor
+spec:
+  type: LoadBalancer
+  # Keep the client's own source address. With the default (Cluster) every
+  # query would arrive from a node's address, which RECURSOR_ALLOW_FROM would
+  # then allow or refuse wholesale, whoever actually sent it.
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: recursor
+  ports:
+    - name: dns-udp
+      port: 53
+      targetPort: dns-udp
+      protocol: UDP
+    - name: dns-tcp
+      port: 53
+      targetPort: dns-tcp
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recursor
+  labels:
+    app.kubernetes.io/name: recursor
+spec:
+  replicas: 1
+  strategy:
+    # The API volume is ReadWriteOnce: the old pod has to let go of it before
+    # the new one can mount it.
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: recursor
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: recursor
+    spec:
+      containers:
+        - name: recursor
+          image: ghcr.io/timothestoifl24/pdns-recursor
+          envFrom:
+            - configMapRef:
+                name: powerdns-settings
+          env:
+            - name: RECURSOR_API_KEY_FILE
+              value: /run/secrets/recursor_api_key
+          ports:
+            - name: dns-udp
+              containerPort: 53
+              protocol: UDP
+            - name: dns-tcp
+              containerPort: 53
+              protocol: TCP
+            - name: api
+              containerPort: 8082
+              protocol: TCP
+          # Both ports, as in compose: a recursor whose API answers but which
+          # never bound :53 must not be sent any traffic.
+          readinessProbe:
+            exec:
+              command:
+                - bash
+                - -c
+                - >-
+                  timeout 2 bash -c '</dev/tcp/127.0.0.1/8082' &&
+                  timeout 2 bash -c '</dev/tcp/127.0.0.1/53'
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: api }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 512Mi }
+          securityContext:
+            # Starts as root to bind :53 and chown the API volume, then drops
+            # to the pdns user through setuid/setgid in recursor.yml.
+            allowPrivilegeEscalation: false
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - name: api
+              mountPath: /var/lib/powerdns-recursor/api
+            - name: secrets
+              mountPath: /run/secrets
+              readOnly: true
+      volumes:
+        - name: api
+          persistentVolumeClaim:
+            claimName: recursor-api
+        - name: secrets
+          secret:
+            secretName: powerdns-secrets
+            defaultMode: 0444
+            items:
+              - { key: recursor_api_key, path: recursor_api_key }

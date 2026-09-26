@@ -16,6 +16,11 @@ description: From a clean host to a working authoritative nameserver — require
 Nothing else. There is no Node, Python or PowerDNS installation on the host: it
 all happens in the images.
 
+::: tip Kubernetes
+Running on a cluster rather than a single host? The same images deploy with
+`kubectl apply -k deploy/kubernetes` — see [Kubernetes](/kubernetes).
+:::
+
 ::: tip Podman and short image names
 Every `FROM` in this repository names its registry in full
 (`docker.io/library/postgres:18-alpine`). Podman, unlike Docker, has no implicit
@@ -310,7 +315,8 @@ If these nameservers are going to be public, a few things change:
 
 ```
 .
-├── compose.yml               the three services, wired together
+├── compose.yml               the four services, wired together
+├── deploy/kubernetes/        the same stack for Kubernetes, see /kubernetes
 ├── .env / .env.example       every setting, documented
 ├── secrets/                  generated, gitignored, never in the images
 ├── db/
@@ -327,6 +333,7 @@ and with it every zone.
 
 ## Next
 
+- [Kubernetes](/kubernetes) — the same stack on a cluster, with kustomize.
 - [Advanced configuration](/advanced-config) — LDAP, OAuth, SAML, PowerDNS
   settings passthrough, running the panel outside compose.
 - [Guide](/guide) — how zones, records, DNSSEC and the audit log behave.

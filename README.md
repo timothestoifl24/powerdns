@@ -80,12 +80,52 @@ has it — see [Troubleshooting](#troubleshooting).
 plain environment variable instead of a file — each one accepts both `FOO` and
 `FOO_FILE`, and the file wins when both are set.
 
+## Running on Kubernetes
+
+The same images run on any Kubernetes 1.26+ cluster with the kustomize
+manifests in [`deploy/kubernetes`](deploy/kubernetes) — `kubectl` is all you
+need:
+
+```bash
+./scripts/generate-secrets.sh     # the same secrets/ as for compose
+kubectl create namespace powerdns
+kubectl -n powerdns create secret generic powerdns-secrets --from-file=secrets/
+
+# Check PDNS_DNS_ADDRESS first: an unused IP in your cluster's Service CIDR.
+$EDITOR deploy/kubernetes/settings.env
+kubectl apply -k deploy/kubernetes
+
+kubectl -n powerdns port-forward svc/webui 9191:80   # then http://localhost:9191
+kubectl -n powerdns get svc recursor-dns             # DNS on port 53, TCP and UDP
+```
+
+| Object | What it runs |
+| --- | --- |
+| `StatefulSet/db` | PostgreSQL 18 on a 2 Gi PersistentVolumeClaim |
+| `Deployment/pdns` | The authoritative server, behind a Service with a **fixed** cluster IP |
+| `Deployment/recursor` | The front door, with a small PVC for its forward zones |
+| `Service/recursor-dns` | `LoadBalancer` on port 53 for clients |
+| `Deployment/webui` | The panel, behind a ClusterIP Service on port 80 |
+
+`deploy/kubernetes/settings.env` plays the part of `.env`: every setting in
+`.env.example` can go there. The pdns Service needs a fixed address because
+PowerDNS forward rules name IP addresses, not hosts — kustomize copies
+`PDNS_DNS_ADDRESS` into the Service so it and the panel always agree. The
+default, `10.96.0.53`, fits kubeadm, kind and most distributions; k3s wants
+`10.43.0.53`.
+
+The full walkthrough — Ingress and TLS for the panel, clusters without a
+LoadBalancer, pod-network allow-lists, overlays, scaling, backups — is in
+[docs/kubernetes.md](docs/kubernetes.md), also on the
+[documentation site](https://powerdns.stoifl.app/kubernetes).
+
 ## Layout
 
 ```
 .
 ├── compose.yml               the four services, wired together
 ├── .env.example              every setting, documented
+├── deploy/kubernetes/        the same stack as kustomize manifests
 ├── db/
 │   ├── Dockerfile            postgres:18-alpine
 │   ├── schema/powerdns.sql   PowerDNS 4.9 gpgsql schema, verbatim

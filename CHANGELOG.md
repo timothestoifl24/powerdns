@@ -19,6 +19,20 @@ on start-up.
 
 ### Added
 
+- **Kubernetes manifests**, in `deploy/kubernetes`: the same four images as
+  `compose.yml`, deployed with `kubectl apply -k deploy/kubernetes`. PostgreSQL
+  runs as a StatefulSet on a PersistentVolumeClaim, the recursor keeps its
+  forward zones on a small claim of its own and is published on port 53 by a
+  `LoadBalancer` Service that preserves client addresses, and the panel sits
+  behind a ClusterIP Service ready for an Ingress. Settings live in
+  `deploy/kubernetes/settings.env`, the counterpart of `.env`; the secrets are
+  the files `scripts/generate-secrets.sh` already writes, loaded into one
+  Secret. The authoritative server's Service gets a fixed cluster IP, taken
+  from `PDNS_DNS_ADDRESS`, for the same reason compose gives its container a
+  fixed address: forward rules name IP addresses, not hosts. The walkthrough
+  is in [docs/kubernetes.md](docs/kubernetes.md), and CI now validates the
+  rendered manifests against the Kubernetes API schemas.
+
 - **Each zone has a settings page**, at **Actions → Zone settings**, for the
   zone itself rather than the records in it: its kind and a slave's master
   addresses, the apex nameservers, the SOA — primary nameserver, the

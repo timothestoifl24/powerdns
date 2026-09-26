@@ -1,0 +1,116 @@
+# The admin panel. Reach it with `kubectl port-forward svc/webui 9191:80`, or
+# put an Ingress in front of it -- see docs/kubernetes.md.
+apiVersion: v1
+kind: Service
+metadata:
+  name: webui
+  labels:
+    app.kubernetes.io/name: webui
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: webui
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webui
+  labels:
+    app.kubernetes.io/name: webui
+spec:
+  # One replica: the first start creates the panel's schema, and a login
+  # lockout is counted per process. Scale only once the schema exists.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: webui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: webui
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: webui
+          image: ghcr.io/timothestoifl24/pdns-webui
+          # Everything in settings.env, like compose's env_file: .env -- the
+          # authentication settings in particular. The entries below win over
+          # it, since they describe how the pods are wired together.
+          envFrom:
+            - configMapRef:
+                name: powerdns-settings
+          env:
+            - name: SECRET_KEY_FILE
+              value: /run/secrets/webui_secret_key
+            - name: DB_HOST
+              value: db
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef: { name: powerdns-settings, key: WEBUI_DB_USER }
+            - name: DB_SCHEMA
+              valueFrom:
+                configMapKeyRef: { name: powerdns-settings, key: WEBUI_DB_SCHEMA }
+            - name: DB_PASSWORD_FILE
+              value: /run/secrets/webui_db_password
+            - name: PDNS_API_URL
+              value: http://pdns:8081
+            - name: PDNS_API_KEY_FILE
+              value: /run/secrets/pdns_api_key
+            - name: RECURSOR_API_URL
+              value: http://recursor:8082
+            - name: RECURSOR_API_KEY_FILE
+              value: /run/secrets/recursor_api_key
+            - name: BOOTSTRAP_ADMIN_PASSWORD_FILE
+              value: /run/secrets/webui_admin_password
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          # /healthz only says the process serves requests. /readyz also
+          # checks the database and PowerDNS, which would take the panel --
+          # and the error page it shows about them -- offline with them.
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 20
+            timeoutSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 50m, memory: 192Mi }
+            limits: { memory: 1Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: secrets
+              mountPath: /run/secrets
+              readOnly: true
+      volumes:
+        - name: secrets
+          secret:
+            secretName: powerdns-secrets
+            defaultMode: 0444
+            items:
+              - { key: webui_secret_key, path: webui_secret_key }
+              - { key: webui_db_password, path: webui_db_password }
+              - { key: webui_admin_password, path: webui_admin_password }
+              - { key: pdns_api_key, path: pdns_api_key }
+              - { key: recursor_api_key, path: recursor_api_key }

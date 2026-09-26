@@ -1,0 +1,121 @@
+# PowerDNS Authoritative Server.
+#
+# Stateless: every zone, record and DNSSEC key is in PostgreSQL, so the pod can
+# be replaced -- or scaled -- freely. Clients do not query it directly; the
+# recursor is the front door and forwards the local zones here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: pdns
+  labels:
+    app.kubernetes.io/name: pdns
+spec:
+  type: ClusterIP
+  # Replaced from PDNS_DNS_ADDRESS in settings.env by kustomization.yaml. The
+  # recursor's forward rules name this address, so it must not change: a
+  # Service keeps its cluster IP for as long as it exists, and fixing it here
+  # means a deleted and re-created Service comes back on the same one.
+  clusterIP: PDNS_DNS_ADDRESS
+  clusterIPs:
+    - PDNS_DNS_ADDRESS
+  selector:
+    app.kubernetes.io/name: pdns
+  ports:
+    - name: dns-udp
+      port: 53
+      targetPort: dns-udp
+      protocol: UDP
+    - name: dns-tcp
+      port: 53
+      targetPort: dns-tcp
+      protocol: TCP
+    # The HTTP API the panel drives. Cluster-internal only.
+    - name: api
+      port: 8081
+      targetPort: api
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pdns
+  labels:
+    app.kubernetes.io/name: pdns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pdns
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pdns
+    spec:
+      containers:
+        - name: pdns
+          image: ghcr.io/timothestoifl24/pdns
+          envFrom:
+            - configMapRef:
+                name: powerdns-settings
+          env:
+            - name: PDNS_GPGSQL_HOST
+              value: db
+            - name: PDNS_GPGSQL_PORT
+              value: "5432"
+            - name: PDNS_GPGSQL_USER
+              valueFrom:
+                configMapKeyRef: { name: powerdns-settings, key: PDNS_DB_USER }
+            - name: PDNS_GPGSQL_DBNAME
+              valueFrom:
+                configMapKeyRef: { name: powerdns-settings, key: DB_NAME }
+            - name: PDNS_GPGSQL_PASSWORD_FILE
+              value: /run/secrets/pdns_db_password
+            - name: PDNS_API_KEY_FILE
+              value: /run/secrets/pdns_api_key
+            # Longer than compose's default: on a fresh cluster the database
+            # volume is provisioned and initialised while this pod waits.
+            - name: PDNS_DB_WAIT_SECONDS
+              value: "180"
+          ports:
+            - name: dns-udp
+              containerPort: 53
+              protocol: UDP
+            - name: dns-tcp
+              containerPort: 53
+              protocol: TCP
+            - name: api
+              containerPort: 8081
+              protocol: TCP
+          startupProbe:
+            tcpSocket: { port: dns-tcp }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket: { port: dns-tcp }
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: api }
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 512Mi }
+          securityContext:
+            # Starts as root to bind :53 and render its config, then drops to
+            # the pdns user through setuid/setgid in pdns.conf.
+            allowPrivilegeEscalation: false
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - name: secrets
+              mountPath: /run/secrets
+              readOnly: true
+      volumes:
+        - name: secrets
+          secret:
+            secretName: powerdns-secrets
+            defaultMode: 0444
+            items:
+              - { key: pdns_db_password, path: pdns_db_password }
+              - { key: pdns_api_key, path: pdns_api_key }

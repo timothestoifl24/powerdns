@@ -13,7 +13,7 @@ from .config import ConfigError, build_config
 from .pdns import COMMON_RECORD_TYPES, ZONE_KINDS, client_from_config, relative_name
 from .security import LoginThrottle, csrf_token, current_user, validate_csrf
 
-__version__ = "1.0.0"
+__version__ = "1.3.0"
 
 
 def configure_logging(level: str) -> None:

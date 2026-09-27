@@ -1,0 +1,62 @@
+# PowerDNS + PostgreSQL + web admin panel on Kubernetes.
+#
+# The same four images as compose.yml, wired together the same way:
+#
+#   ./scripts/k8s-secrets.sh create      # namespace + Secret, never on disk
+#   kubectl apply -k deploy/kubernetes
+#
+# Every setting lives in settings.env, which plays the part of compose's .env.
+# See docs/kubernetes.md for the walkthrough.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: powerdns
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: powerdns
+    includeSelectors: false
+
+resources:
+  - db.yaml
+  - pdns.yaml
+  - recursor.yaml
+  - webui.yaml
+
+configMapGenerator:
+  - name: powerdns-settings
+    envs:
+      - settings.env
+
+# Pin a release rather than following latest:
+#   cd deploy/kubernetes && kubectl kustomize edit set image \
+#     ghcr.io/timothestoifl24/pdns-webui=ghcr.io/timothestoifl24/pdns-webui:1.2
+# or edit newTag below for all four at once.
+images:
+  - name: ghcr.io/timothestoifl24/pdns-db
+    newTag: latest
+  - name: ghcr.io/timothestoifl24/pdns
+    newTag: latest
+  - name: ghcr.io/timothestoifl24/pdns-recursor
+    newTag: latest
+  - name: ghcr.io/timothestoifl24/pdns-webui
+    newTag: latest
+
+# Forward targets in PowerDNS are IP addresses, never names, so the recursor
+# cannot be pointed at "pdns.powerdns.svc". The pdns Service therefore gets a
+# fixed cluster IP -- the Kubernetes counterpart of compose's PDNS_STATIC_IP --
+# and it is taken from PDNS_DNS_ADDRESS in settings.env, so the panel and the
+# Service can never disagree about it.
+replacements:
+  - source:
+      kind: ConfigMap
+      name: powerdns-settings
+      fieldPath: data.PDNS_DNS_ADDRESS
+    targets:
+      - select:
+          kind: Service
+          name: pdns
+        fieldPaths:
+          - spec.clusterIP
+          - spec.clusterIPs.0

@@ -388,6 +388,9 @@ would break the moment that container was recreated with a new address.
 Change `BACKEND_SUBNET` and `PDNS_STATIC_IP` together if the default subnet
 collides with a network your host already uses.
 
+On Kubernetes the same job is done by the `pdns` Service's cluster IP, fixed
+through `PDNS_DNS_ADDRESS` — see [Kubernetes](/kubernetes#why-the-pdns-service-has-a-fixed-address).
+
 ### Do not make it an open resolver
 
 `RECURSOR_ALLOW_FROM` defaults to loopback and the private ranges. A recursor

@@ -12,10 +12,12 @@ from their labels. Upgrade instructions live in
 
 ## [Unreleased]
 
-Everything here is additive: no setting changes meaning, and a stack that
-pulls without ticking any of the new boxes behaves exactly as it did. The
-panel creates two tables of its own, `reverse_links` and `zone_reverse_links`,
-on start-up.
+## [1.3.0] — 2026-09-27
+
+Kubernetes support. Nothing changes for compose: `compose.yml`, every setting
+and the images' behaviour are as they were in 1.2.1 — only the version the
+panel reports is new — so a compose stack can pull 1.3.0 or stay where it is. The new manifests reference the same images, so
+`kubectl apply -k deploy/kubernetes` runs exactly what compose runs.
 
 ### Added
 
@@ -28,11 +30,31 @@ on start-up.
   `deploy/kubernetes/settings.env`, the counterpart of `.env`; the secrets are
   generated straight into one Secret by `scripts/k8s-secrets.sh`, which
   never writes them to disk or puts them on a command line, and removes the
-  first-run admin password once it has been used. The authoritative server's Service gets a fixed cluster IP, taken
-  from `PDNS_DNS_ADDRESS`, for the same reason compose gives its container a
-  fixed address: forward rules name IP addresses, not hosts. The walkthrough
-  is in [docs/kubernetes.md](docs/kubernetes.md), and CI now validates the
-  rendered manifests against the Kubernetes API schemas.
+  first-run admin password once it has been used. The authoritative server's
+  Service gets a fixed cluster IP, taken from `PDNS_DNS_ADDRESS`, for the same
+  reason compose gives its container a fixed address: forward rules name IP
+  addresses, not hosts. The walkthrough is in
+  [docs/kubernetes.md](docs/kubernetes.md), and CI now validates the rendered
+  manifests against the Kubernetes API schemas.
+
+- **`scripts/k8s-secrets.sh`** creates and maintains the `powerdns-secrets`
+  Secret: `create` generates every value inside the cluster, `set KEY` adds a
+  provider secret from a silent prompt or stdin, `admin-password` shows the
+  first-run password on a terminal only, and `forget-admin-password` deletes
+  it once it has been used. Values travel to `kubectl` on stdin, so none is
+  left on disk, in shell history or in `ps`.
+
+### Changed
+
+- **The panel reports its real version.** `/healthz` and the start-up log
+  said `1.0.0` in every release so far; they now carry the release number.
+
+## [1.2.1] — 2026-09-19
+
+Additive: the panel creates one table of its own, `zone_reverse_links`, on
+start-up, and nothing else changes for a stack that does not use the new page.
+
+### Added
 
 - **Each zone has a settings page**, at **Actions → Zone settings**, for the
   zone itself rather than the records in it: its kind and a slave's master
@@ -68,6 +90,14 @@ on start-up.
   Linking never restricts what can be written, and unticking a zone leaves
   every existing `PTR` following its record -- it only stops new records
   defaulting there.
+
+## [1.2.0] — 2026-09-19
+
+Additive: no setting changes meaning, and a stack that pulls without ticking
+any of the new boxes behaves exactly as it did. The panel creates one table of
+its own, `reverse_links`, on start-up.
+
+### Added
 
 - **A zone can be created together with its reverse zones.** Tick *Also create
   the reverse zone for this zone's networks* on the new-zone form and give the
@@ -287,6 +317,9 @@ everything below has landed since; if you are coming from it, read
 - The panel's `users` table gained `role_locked` and `last_groups`. They are
   added on start-up, so no manual migration is needed.
 
-[Unreleased]: https://github.com/timothestoifl24/powerdns/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/timothestoifl24/powerdns/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/timothestoifl24/powerdns/compare/v1.2.1...v1.3.0
+[1.2.1]: https://github.com/timothestoifl24/powerdns/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/timothestoifl24/powerdns/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/timothestoifl24/powerdns/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/timothestoifl24/powerdns/compare/v1.0.0...v1.0.1

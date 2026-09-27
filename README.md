@@ -87,17 +87,21 @@ manifests in [`deploy/kubernetes`](deploy/kubernetes) — `kubectl` is all you
 need:
 
 ```bash
-./scripts/generate-secrets.sh     # the same secrets/ as for compose
-kubectl create namespace powerdns
-kubectl -n powerdns create secret generic powerdns-secrets --from-file=secrets/
+./scripts/k8s-secrets.sh create   # namespace + Secret, generated in the cluster
 
 # Check PDNS_DNS_ADDRESS first: an unused IP in your cluster's Service CIDR.
 $EDITOR deploy/kubernetes/settings.env
 kubectl apply -k deploy/kubernetes
 
 kubectl -n powerdns port-forward svc/webui 9191:80   # then http://localhost:9191
+./scripts/k8s-secrets.sh admin-password              # first sign-in only
+./scripts/k8s-secrets.sh forget-admin-password       # once you have changed it
 kubectl -n powerdns get svc recursor-dns             # DNS on port 53, TCP and UDP
 ```
+
+The secrets are generated inside the cluster and passed to `kubectl` on
+stdin: no copy is left on disk or in shell history, and the first-run admin
+password is removed from the Secret once it has done its job.
 
 | Object | What it runs |
 | --- | --- |
@@ -144,7 +148,9 @@ LoadBalancer, pod-network allow-lists, overlays, scaling, backups — is in
 │   ├── Dockerfile            Tabler vendored at build time, then the Flask app
 │   ├── app/                  the panel
 │   └── tests/                517 tests, incl. an in-memory PowerDNS and recursor
-├── scripts/generate-secrets.sh
+├── scripts/
+│   ├── generate-secrets.sh   secrets/ for compose
+│   └── k8s-secrets.sh        the Kubernetes Secret, never on disk
 └── docs/                     the documentation site (VitePress)
 ```
 

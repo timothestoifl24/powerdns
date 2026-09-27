@@ -62,24 +62,36 @@ The images are published multi-architecture (amd64 and arm64) to
 git clone https://github.com/timothestoifl24/powerdns.git
 cd powerdns
 
-./scripts/generate-secrets.sh
+./scripts/k8s-secrets.sh create
 ```
 
-This is the same script compose uses. It writes seven files to `secrets/`
-(and a `.env` that Kubernetes ignores). Load them into a Secret — the file
-names become the keys the manifests expect:
+This creates the `powerdns` namespace and the `powerdns-secrets` Secret with
+seven random values, generated on the spot and handed to `kubectl` on stdin.
+**No copy is written to disk**, none appears on a command line (and so in
+shell history or `ps`), and the Secret is made with `kubectl create`, not
+`apply`, which would store a second copy in its
+`last-applied-configuration` annotation. The Secret is the only place the
+values live; running `create` again leaves an existing one alone, since the
+database roles keep the passwords they were created with.
 
-```bash
-kubectl create namespace powerdns
-kubectl -n powerdns create secret generic powerdns-secrets --from-file=secrets/
-```
+Pass `-n <namespace>` to use another namespace, and set the same one in
+`kustomization.yaml`.
+
+::: warning Protect the Secret, not a file
+Kubernetes stores Secrets base64-encoded, which is not encryption. Anyone who
+can `get secrets` in the namespace can read every value, so keep that right
+to the people who run the stack, and turn on
+[encryption at rest](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/)
+where the cluster allows it.
+:::
 
 ::: tip Bring your own secret store
 Nothing in the manifests cares how `powerdns-secrets` came to exist. With
 External Secrets, Sealed Secrets or Vault, create a Secret of that name with
 the keys `db_superuser_password`, `pdns_db_password`, `webui_db_password`,
-`pdns_api_key`, `recursor_api_key`, `webui_secret_key` and
-`webui_admin_password`. Both API keys must be at least 16 characters.
+`pdns_api_key`, `recursor_api_key` and `webui_secret_key`, plus
+`webui_admin_password` for the first start only. Both API keys must be at
+least 16 characters.
 :::
 
 ### 2. Pick the authoritative server's address
@@ -114,8 +126,23 @@ pods should end up `Running` and `1/1` ready.
 kubectl -n powerdns port-forward svc/webui 9191:80
 ```
 
-Open <http://localhost:9191> and sign in as `admin` with the password in
-`secrets/webui_admin_password`. **Change it under *My profile* straight away.**
+Read the first-run password straight from the Secret — the script prints it
+to a terminal only, never into a pipe or a log:
+
+```bash
+./scripts/k8s-secrets.sh admin-password
+```
+
+Open <http://localhost:9191>, sign in as `admin` with it, and **change it
+under *My profile* straight away.** Then delete it:
+
+```bash
+./scripts/k8s-secrets.sh forget-admin-password
+```
+
+The panel reads it only while its user table is empty, so once you have
+signed in it is a live credential that no longer does anything — nothing
+restarts, and the pod starts fine without it.
 
 ### 5. Check DNS
 
@@ -152,11 +179,13 @@ pod that reads it — no manual restart.
 
 An LDAP bind password or an OAuth client secret belongs in the Secret, not in
 `settings.env`. Every such setting also accepts a `_FILE` variant, so add the
-value to `powerdns-secrets` and point at it:
+value to `powerdns-secrets` and point at it. The script prompts for it without
+echoing, or reads one line from stdin, so it stays out of your shell history:
 
 ```bash
-kubectl -n powerdns create secret generic powerdns-secrets --from-file=secrets/ \
-  --from-literal=ldap_bind_password='…' --dry-run=client -o yaml | kubectl apply -f -
+./scripts/k8s-secrets.sh set ldap_bind_password
+# or straight from a password manager
+op read 'op://Infra/LDAP bind/password' | ./scripts/k8s-secrets.sh set ldap_bind_password
 ```
 
 Then in `webui.yaml`, add the key to the `secrets` volume's `items` and the
@@ -390,7 +419,7 @@ pick another.
 
 **A pod is stuck in `ContainerCreating`.** `kubectl -n powerdns describe pod`
 shows `secret "powerdns-secrets" not found` or a missing key: create the Secret
-from `secrets/` as in [step 1](#_1-generate-the-secrets). The pods start on
+as in [step 1](#_1-generate-the-secrets). The pods start on
 their own once it exists.
 
 **`Deployment does not have minimum availability`.** The Deployment's pods are

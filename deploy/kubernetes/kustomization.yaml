@@ -2,9 +2,7 @@
 #
 # The same four images as compose.yml, wired together the same way:
 #
-#   ./scripts/generate-secrets.sh
-#   kubectl create namespace powerdns
-#   kubectl -n powerdns create secret generic powerdns-secrets --from-file=secrets/
+#   ./scripts/k8s-secrets.sh create      # namespace + Secret, never on disk
 #   kubectl apply -k deploy/kubernetes
 #
 # Every setting lives in settings.env, which plays the part of compose's .env.

@@ -78,8 +78,17 @@ spec:
               value: http://recursor:8082
             - name: RECURSOR_API_KEY_FILE
               value: /run/secrets/powerdns/recursor_api_key
-            - name: BOOTSTRAP_ADMIN_PASSWORD_FILE
-              value: /run/secrets/powerdns/webui_admin_password
+            # Only read while no user exists. Optional, and an env reference
+            # rather than a file, so that `scripts/k8s-secrets.sh
+            # forget-admin-password` can delete it from the Secret after the
+            # first sign-in without the pod failing to start over a missing
+            # key or a *_FILE that points at nothing.
+            - name: BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: powerdns-secrets
+                  key: webui_admin_password
+                  optional: true
           ports:
             - name: http
               containerPort: 8080
@@ -119,6 +128,5 @@ spec:
             items:
               - { key: webui_secret_key, path: webui_secret_key }
               - { key: webui_db_password, path: webui_db_password }
-              - { key: webui_admin_password, path: webui_admin_password }
               - { key: pdns_api_key, path: pdns_api_key }
               - { key: recursor_api_key, path: recursor_api_key }

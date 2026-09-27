@@ -26,8 +26,9 @@ on start-up.
   `LoadBalancer` Service that preserves client addresses, and the panel sits
   behind a ClusterIP Service ready for an Ingress. Settings live in
   `deploy/kubernetes/settings.env`, the counterpart of `.env`; the secrets are
-  the files `scripts/generate-secrets.sh` already writes, loaded into one
-  Secret. The authoritative server's Service gets a fixed cluster IP, taken
+  generated straight into one Secret by `scripts/k8s-secrets.sh`, which
+  never writes them to disk or puts them on a command line, and removes the
+  first-run admin password once it has been used. The authoritative server's Service gets a fixed cluster IP, taken
   from `PDNS_DNS_ADDRESS`, for the same reason compose gives its container a
   fixed address: forward rules name IP addresses, not hosts. The walkthrough
   is in [docs/kubernetes.md](docs/kubernetes.md), and CI now validates the

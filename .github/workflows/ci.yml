@@ -92,6 +92,16 @@ jobs:
             echo "::error::the pdns Service does not carry PDNS_DNS_ADDRESS=${want}"
             exit 1
           fi
+      - name: Nothing is mounted over the service-account token's parent
+        # /var/run is /run in every image here. A read-only volume at
+        # /run/secrets (or /var/run/secrets) leaves the runtime unable to
+        # create the token's mount point inside it, and the pod never starts.
+        run: |
+          set -euo pipefail
+          if grep -nE 'mountPath: */(var/)?run/secrets/?$' rendered.yaml; then
+            echo "::error::a volume is mounted at /run/secrets; use a subdirectory such as /run/secrets/powerdns"
+            exit 1
+          fi
       - name: Validate against the Kubernetes API schemas
         run: |
           set -euo pipefail

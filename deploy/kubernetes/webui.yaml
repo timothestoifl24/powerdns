@@ -34,6 +34,14 @@ spec:
       labels:
         app.kubernetes.io/name: webui
     spec:
+      # Nothing here talks to the Kubernetes API. Without the token there is
+      # also no mount at /var/run/secrets/kubernetes.io -- /var/run is /run in
+      # these images, and that mount point cannot be created inside the
+      # read-only secret volume, so keep the two apart even if re-enabled.
+      automountServiceAccountToken: false
+      # No <SERVICE>_PORT=tcp://... variables: they share prefixes with the
+      # PDNS_* and RECURSOR_* settings the entrypoints read.
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -49,7 +57,7 @@ spec:
                 name: powerdns-settings
           env:
             - name: SECRET_KEY_FILE
-              value: /run/secrets/webui_secret_key
+              value: /run/secrets/powerdns/webui_secret_key
             - name: DB_HOST
               value: db
             - name: DB_PORT
@@ -61,17 +69,17 @@ spec:
               valueFrom:
                 configMapKeyRef: { name: powerdns-settings, key: WEBUI_DB_SCHEMA }
             - name: DB_PASSWORD_FILE
-              value: /run/secrets/webui_db_password
+              value: /run/secrets/powerdns/webui_db_password
             - name: PDNS_API_URL
               value: http://pdns:8081
             - name: PDNS_API_KEY_FILE
-              value: /run/secrets/pdns_api_key
+              value: /run/secrets/powerdns/pdns_api_key
             - name: RECURSOR_API_URL
               value: http://recursor:8082
             - name: RECURSOR_API_KEY_FILE
-              value: /run/secrets/recursor_api_key
+              value: /run/secrets/powerdns/recursor_api_key
             - name: BOOTSTRAP_ADMIN_PASSWORD_FILE
-              value: /run/secrets/webui_admin_password
+              value: /run/secrets/powerdns/webui_admin_password
           ports:
             - name: http
               containerPort: 8080
@@ -101,7 +109,7 @@ spec:
               drop: ["ALL"]
           volumeMounts:
             - name: secrets
-              mountPath: /run/secrets
+              mountPath: /run/secrets/powerdns
               readOnly: true
       volumes:
         - name: secrets

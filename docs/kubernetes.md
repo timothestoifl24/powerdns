@@ -164,7 +164,7 @@ variable to the container's `env`:
 
 ```yaml
 - name: LDAP_BIND_PASSWORD_FILE
-  value: /run/secrets/ldap_bind_password
+  value: /run/secrets/powerdns/ldap_bind_password
 ```
 
 ### Pinning a release
@@ -392,6 +392,15 @@ pick another.
 shows `secret "powerdns-secrets" not found` or a missing key: create the Secret
 from `secrets/` as in [step 1](#_1-generate-the-secrets). The pods start on
 their own once it exists.
+
+**`Deployment does not have minimum availability`.** The Deployment's pods are
+not ready yet; `kubectl -n powerdns get pods` and `describe pod` say why. A
+`RunContainerError` mentioning `mkdirat …/run/secrets/kubernetes.io:
+read-only file system` means a secret volume was mounted at `/run/secrets`
+itself: `/var/run` is `/run` in these images, so the service-account token
+mount would have to be created inside it. The manifests mount the secrets at
+`/run/secrets/powerdns` and turn the token off; keep it that way in any patch
+of your own.
 
 **`recursor-dns` stays `<pending>`.** The cluster has no LoadBalancer
 implementation; see [No LoadBalancer](#no-loadbalancer).

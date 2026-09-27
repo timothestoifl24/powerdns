@@ -51,6 +51,14 @@ spec:
       labels:
         app.kubernetes.io/name: pdns
     spec:
+      # Nothing here talks to the Kubernetes API. Without the token there is
+      # also no mount at /var/run/secrets/kubernetes.io -- /var/run is /run in
+      # these images, and that mount point cannot be created inside the
+      # read-only secret volume, so keep the two apart even if re-enabled.
+      automountServiceAccountToken: false
+      # No <SERVICE>_PORT=tcp://... variables: they share prefixes with the
+      # PDNS_* and RECURSOR_* settings the entrypoints read.
+      enableServiceLinks: false
       containers:
         - name: pdns
           image: ghcr.io/timothestoifl24/pdns
@@ -69,9 +77,9 @@ spec:
               valueFrom:
                 configMapKeyRef: { name: powerdns-settings, key: DB_NAME }
             - name: PDNS_GPGSQL_PASSWORD_FILE
-              value: /run/secrets/pdns_db_password
+              value: /run/secrets/powerdns/pdns_db_password
             - name: PDNS_API_KEY_FILE
-              value: /run/secrets/pdns_api_key
+              value: /run/secrets/powerdns/pdns_api_key
             # Longer than compose's default: on a fresh cluster the database
             # volume is provisioned and initialised while this pod waits.
             - name: PDNS_DB_WAIT_SECONDS
@@ -109,7 +117,7 @@ spec:
             seccompProfile: { type: RuntimeDefault }
           volumeMounts:
             - name: secrets
-              mountPath: /run/secrets
+              mountPath: /run/secrets/powerdns
               readOnly: true
       volumes:
         - name: secrets

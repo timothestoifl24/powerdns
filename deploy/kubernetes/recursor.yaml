@@ -80,6 +80,14 @@ spec:
       labels:
         app.kubernetes.io/name: recursor
     spec:
+      # Nothing here talks to the Kubernetes API. Without the token there is
+      # also no mount at /var/run/secrets/kubernetes.io -- /var/run is /run in
+      # these images, and that mount point cannot be created inside the
+      # read-only secret volume, so keep the two apart even if re-enabled.
+      automountServiceAccountToken: false
+      # No <SERVICE>_PORT=tcp://... variables: they share prefixes with the
+      # PDNS_* and RECURSOR_* settings the entrypoints read.
+      enableServiceLinks: false
       containers:
         - name: recursor
           image: ghcr.io/timothestoifl24/pdns-recursor
@@ -88,7 +96,7 @@ spec:
                 name: powerdns-settings
           env:
             - name: RECURSOR_API_KEY_FILE
-              value: /run/secrets/recursor_api_key
+              value: /run/secrets/powerdns/recursor_api_key
           ports:
             - name: dns-udp
               containerPort: 53
@@ -129,7 +137,7 @@ spec:
             - name: api
               mountPath: /var/lib/powerdns-recursor/api
             - name: secrets
-              mountPath: /run/secrets
+              mountPath: /run/secrets/powerdns
               readOnly: true
       volumes:
         - name: api

@@ -8,7 +8,7 @@ Each released version is also a
 [GitHub release](https://github.com/timothestoifl24/powerdns/releases), where
 the entry below is followed by the full list of merged pull requests, generated
 from their labels. Upgrade instructions live in
-[docs/upgrading.md](docs/upgrading.md).
+[Upgrading](https://powerdns.stoifl.app/upgrading).
 
 ## [Unreleased]
 
@@ -33,9 +33,9 @@ panel reports is new — so a compose stack can pull 1.3.0 or stay where it is. 
   first-run admin password once it has been used. The authoritative server's
   Service gets a fixed cluster IP, taken from `PDNS_DNS_ADDRESS`, for the same
   reason compose gives its container a fixed address: forward rules name IP
-  addresses, not hosts. The walkthrough is in
-  [docs/kubernetes.md](docs/kubernetes.md), and CI now validates the rendered
-  manifests against the Kubernetes API schemas.
+  addresses, not hosts. The walkthrough is on the
+  [Kubernetes page](https://powerdns.stoifl.app/kubernetes) of the docs, and CI
+  now validates the rendered manifests against the Kubernetes API schemas.
 
 - **`scripts/k8s-secrets.sh`** creates and maintains the `powerdns-secrets`
   Secret: `create` generates every value inside the cluster, `set KEY` adds a

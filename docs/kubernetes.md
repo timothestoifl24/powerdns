@@ -350,7 +350,9 @@ conflicts with them:
 ```
 
 `/opt/powerdns-local/kind.yaml` — the machine's port 53 (UDP and TCP) and
-9191 go to fixed NodePorts inside the node:
+9191 go to fixed NodePorts inside the node. Replace `192.168.1.50` with the
+machine's LAN address (`hostname -I`), and reserve that address in your
+router's DHCP settings so it never moves under your clients:
 
 ```yaml
 kind: Cluster
@@ -358,10 +360,22 @@ apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
   - role: control-plane
     extraPortMappings:
-      - { containerPort: 30053, hostPort: 53, protocol: UDP, listenAddress: "0.0.0.0" }
-      - { containerPort: 30053, hostPort: 53, protocol: TCP, listenAddress: "0.0.0.0" }
+      - { containerPort: 30053, hostPort: 53, protocol: UDP, listenAddress: "192.168.1.50" }
+      - { containerPort: 30053, hostPort: 53, protocol: TCP, listenAddress: "192.168.1.50" }
       - { containerPort: 30080, hostPort: 9191, protocol: TCP, listenAddress: "0.0.0.0" }
 ```
+
+::: warning Name an address for port 53, never `0.0.0.0`
+Podman resolves container names with aardvark-dns, which listens on port 53
+of every Podman network's gateway — `10.89.0.1` for kind's network. Port 53 on
+`0.0.0.0` claims that address too, and `kind create cluster` fails with
+*aardvark-dns failed to start … failed to bind udp listener on 10.89.0.1:53:
+Address already in use*. Binding the LAN address leaves the gateway to
+aardvark-dns. It is the same collision compose runs into; see
+[Podman: bind an address](/setup#podman-bind-an-address-never-0-0-0-0). The
+panel's port has no such conflict. Docker is unaffected, but the named
+address works there as well.
+:::
 
 `/opt/powerdns-local/kustomization.yaml` — the manifests from the clone, with
 `recursor-dns` and `webui` turned into NodePorts on exactly those ports:
@@ -411,8 +425,9 @@ kubectl apply -k /opt/powerdns-local
 kubectl -n powerdns get pods -w          # until all four are 1/1 Running
 ```
 
-The panel is at `http://<machine>:9191`, and DNS answers on the machine's port
-53. From another device:
+The panel is at `http://<machine>:9191`, and DNS answers on port 53 of the
+address you named — from the machine itself too, so query that address
+rather than `127.0.0.1`. From another device:
 
 ```bash
 dig @<machine> example.com SOA

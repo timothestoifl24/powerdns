@@ -17,7 +17,8 @@ from their labels. Upgrade instructions live in
 - **Running on a single machine with kind.** The Kubernetes guide has a
   section for kind — a Raspberry Pi or a home server — where the node is a
   container and NodePorts never reach the host. A cluster config maps the
-  machine's port 53 (UDP and TCP) and 9191 to fixed NodePorts, a small overlay
+  machine's port 53 (UDP and TCP, on its LAN address rather than `0.0.0.0`,
+  which collides with Podman's aardvark-dns) and 9191 to fixed NodePorts, a small overlay
   next to the clone pins `recursor-dns` and `webui` to them, and the section
   covers moving an existing cluster over with a dump and restore, why the
   recursor's allow-list stops telling clients apart behind the runtime's NAT,

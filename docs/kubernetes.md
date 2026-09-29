@@ -325,6 +325,159 @@ On a cluster without one, any of these work:
   ClusterIP — and point CoreDNS at it for your zones with a `forward` block in
   the `coredns` ConfigMap.
 
+On [kind](https://kind.sigs.k8s.io) none of these reach the host by
+themselves, because the node is a container; see
+[Running on a single machine with kind](#running-on-a-single-machine-with-kind).
+
+## Running on a single machine with kind
+
+kind is a convenient way to run the stack on one box — a Raspberry Pi, a
+home server — but its node is a container, so a NodePort opens inside that
+container and not on the machine. `kubectl port-forward` is no way round it
+for DNS either: it carries TCP only, and most DNS queries are UDP. The fix is
+to have kind publish the NodePorts on the host, which it can only do when the
+cluster is created.
+
+Keep your changes next to the clone rather than in it, so `git pull` never
+conflicts with them:
+
+```
+/opt/
+├── powerdns/                   the git clone, untouched
+└── powerdns-local/
+    ├── kind.yaml               port mappings, read when the cluster is created
+    └── kustomization.yaml      fixed NodePorts for DNS and the panel
+```
+
+`/opt/powerdns-local/kind.yaml` — the machine's port 53 (UDP and TCP) and
+9191 go to fixed NodePorts inside the node:
+
+```yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - { containerPort: 30053, hostPort: 53, protocol: UDP, listenAddress: "0.0.0.0" }
+      - { containerPort: 30053, hostPort: 53, protocol: TCP, listenAddress: "0.0.0.0" }
+      - { containerPort: 30080, hostPort: 9191, protocol: TCP, listenAddress: "0.0.0.0" }
+```
+
+`/opt/powerdns-local/kustomization.yaml` — the manifests from the clone, with
+`recursor-dns` and `webui` turned into NodePorts on exactly those ports:
+
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../powerdns/deploy/kubernetes
+patches:
+  - target:
+      kind: Service
+      name: recursor-dns
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: NodePort
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30053
+      - op: add
+        path: /spec/ports/1/nodePort
+        value: 30053
+  - target:
+      kind: Service
+      name: webui
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: NodePort
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30080
+```
+
+The patches address the ports by position on purpose. Both DNS ports are
+port 53, one UDP and one TCP, and a strategic-merge patch matches Service
+ports by number alone — it would fold the two into one.
+
+Then create the cluster and deploy through the overlay rather than
+`deploy/kubernetes`:
+
+```bash
+kind create cluster --config /opt/powerdns-local/kind.yaml
+cd /opt/powerdns && ./scripts/k8s-secrets.sh create
+kubectl apply -k /opt/powerdns-local
+kubectl -n powerdns get pods -w          # until all four are 1/1 Running
+```
+
+The panel is at `http://<machine>:9191`, and DNS answers on the machine's port
+53. From another device:
+
+```bash
+dig @<machine> example.com SOA
+dig @<machine> +tcp example.com SOA
+```
+
+Once both answer, point your router's DHCP DNS option at the machine.
+
+### Moving an existing kind cluster over
+
+Port mappings cannot be added to a running kind cluster, so an existing one
+has to be recreated, and recreating it deletes the database volume. Dump the
+zones first and restore them into the new cluster:
+
+```bash
+kubectl -n powerdns exec db-0 -- pg_dump -U postgres -Fc pdns > ~/pdns.dump
+
+kind delete cluster
+kind create cluster --config /opt/powerdns-local/kind.yaml
+cd /opt/powerdns && ./scripts/k8s-secrets.sh create
+kubectl apply -k /opt/powerdns-local
+kubectl -n powerdns get pods -w          # wait for 1/1 Running
+
+kubectl -n powerdns exec -i db-0 -- pg_restore -U postgres -d pdns --clean --if-exists < ~/pdns.dump
+```
+
+The new Secret has new database passwords, which is fine: they belong to the
+new database, and the restore brings back the zones and the panel's users —
+your admin password included — rather than the roles. Its first-run admin
+password goes unused, because users already exist; remove it with
+`./scripts/k8s-secrets.sh forget-admin-password`.
+
+### Before you open port 53
+
+- **Nothing else may hold it.** `sudo ss -lunp | grep ':53 '` shows who does;
+  on many distributions it is `systemd-resolved` or `dnsmasq`, whose listener
+  has to go first. See [Something already owns port 53](/setup#something-already-owns-port-53).
+- **Rootless Podman cannot bind ports below 1024.** Run kind with rootful
+  Podman or Docker, or allow it once:
+  `sudo sysctl net.ipv4.ip_unprivileged_port_start=53` (persist it in
+  `/etc/sysctl.d/`).
+- **`RECURSOR_ALLOW_FROM` no longer tells clients apart.** Every query reaches
+  the recursor through the container runtime's NAT, so it arrives from a
+  private address and is allowed, whoever sent it. Restrict port 53 on the
+  machine's firewall instead — for example
+  `sudo ufw allow from 192.168.1.0/24 to any port 53` with your LAN's subnet.
+- **Never forward port 53 from your router.** A recursive resolver reachable
+  from the internet is found within days and used to amplify attacks on
+  others.
+- **The panel on 9191 is plain HTTP**, reachable by anyone on the network.
+  Keep it on the LAN, or put it behind an [Ingress with TLS](#exposing-the-panel).
+
+::: tip Just trying it out?
+Without recreating anything, `kubectl port-forward` reaches the panel from
+other machines if you ask it to listen on every address — by default it
+binds `127.0.0.1` only:
+
+```bash
+nohup kubectl -n powerdns port-forward --address 0.0.0.0 svc/webui 9191:80 > /tmp/webui-pf.log 2>&1 &
+```
+
+It stops whenever the webui pod restarts or the machine reboots, and it
+cannot carry DNS, so it is a stopgap rather than a setup.
+:::
+
 ## Why the pdns Service has a fixed address
 
 Forward targets in PowerDNS are IP addresses, never names: the recursor reads

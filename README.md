@@ -119,7 +119,8 @@ default, `10.96.0.53`, fits kubeadm, kind and most distributions; k3s wants
 `10.43.0.53`.
 
 The full walkthrough — Ingress and TLS for the panel, clusters without a
-LoadBalancer, pod-network allow-lists, overlays, scaling, backups — is in
+LoadBalancer, a single machine such as a Raspberry Pi running kind (DNS on the
+host's port 53), pod-network allow-lists, overlays, scaling, backups — is in
 [docs/kubernetes.md](docs/kubernetes.md), also on the
 [documentation site](https://powerdns.stoifl.app/kubernetes).
 

@@ -19,10 +19,13 @@ from their labels. Upgrade instructions live in
   CI job that validated the manifests are gone; compose is again the one
   supported way to run the stack. Nothing changes for a compose deployment.
   A cluster running the 1.3.0 manifests keeps running, but nothing here
-  maintains them any more: to move it to compose, dump the database with
-  `kubectl -n powerdns exec db-0 -- pg_dump -U postgres -Fc pdns > pdns.dump`,
-  start the compose stack, and restore the dump into its `db` service. Since
-  this removes a released feature, the next release is a major version.
+  maintains them any more. Moving it to compose takes more than the database:
+  the panel's `SECRET_KEY` has to come along, or every sign-in provider secret
+  stored through the web UI becomes unreadable, and the recursor keeps your own
+  forward rules and the global forwarders in its volume rather than in
+  PostgreSQL, so they have to be noted and entered again. The steps are in
+  [Upgrading](https://powerdns.stoifl.app/upgrading#moving-from-the-kubernetes-manifests-to-compose).
+  Since this removes a released feature, the next release is a major version.
 
 ## [1.3.0] — 2026-09-27
 

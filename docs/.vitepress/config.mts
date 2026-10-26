@@ -36,7 +36,6 @@ export default defineConfig({
     nav: [
       { text: 'Guide', link: '/guide' },
       { text: 'Setup', link: '/setup' },
-      { text: 'Kubernetes', link: '/kubernetes' },
       { text: 'Screenshots', link: '/screenshots' },
       {
         text: 'Reference',
@@ -57,7 +56,6 @@ export default defineConfig({
           { text: 'Overview', link: '/' },
           { text: 'Guide', link: '/guide' },
           { text: 'Setup', link: '/setup' },
-          { text: 'Kubernetes', link: '/kubernetes' },
           { text: 'Screenshots', link: '/screenshots' },
         ],
       },

@@ -12,17 +12,17 @@ from their labels. Upgrade instructions live in
 
 ## [Unreleased]
 
-### Documentation
+### Removed
 
-- **Running on a single machine with kind.** The Kubernetes guide has a
-  section for kind — a Raspberry Pi or a home server — where the node is a
-  container and NodePorts never reach the host. A cluster config maps the
-  machine's port 53 (UDP and TCP, on its LAN address rather than `0.0.0.0`,
-  which collides with Podman's aardvark-dns) and 9191 to fixed NodePorts, a small overlay
-  next to the clone pins `recursor-dns` and `webui` to them, and the section
-  covers moving an existing cluster over with a dump and restore, why the
-  recursor's allow-list stops telling clients apart behind the runtime's NAT,
-  and why `kubectl port-forward` can reach the panel but never DNS.
+- **Kubernetes support**, added in 1.3.0. `deploy/kubernetes`,
+  `scripts/k8s-secrets.sh`, the Kubernetes page of the documentation and the
+  CI job that validated the manifests are gone; compose is again the one
+  supported way to run the stack. Nothing changes for a compose deployment.
+  A cluster running the 1.3.0 manifests keeps running, but nothing here
+  maintains them any more: to move it to compose, dump the database with
+  `kubectl -n powerdns exec db-0 -- pg_dump -U postgres -Fc pdns > pdns.dump`,
+  start the compose stack, and restore the dump into its `db` service. Since
+  this removes a released feature, the next release is a major version.
 
 ## [1.3.0] — 2026-09-27
 

@@ -385,6 +385,80 @@ back means the 17 dump you took in step 1, restored into a 17 stack — which is
 the argument for keeping that file until the upgrade has proven itself, not
 deleting it once the new stack comes up.
 
+## Moving from the Kubernetes manifests to compose
+
+v1.3.0 shipped Kubernetes manifests; they were removed again after it, and
+compose is the one supported way to run the stack. A cluster still running
+them moves over with its data, but two things live outside the database and
+need carrying across by hand:
+
+- **The panel's `SECRET_KEY`.** Sign-in provider secrets stored through the
+  web UI are encrypted with a key derived from it (see
+  [Rotating secrets](#rotating-secrets)). Starting compose with a newly
+  generated key leaves every one of them unreadable after the restore.
+- **Your own forward rules and the global forwarders.** The recursor keeps
+  them in its own volume, not in PostgreSQL. The panel re-creates only the
+  rules for the zones it is authoritative for — pointed at compose's address
+  for the authoritative server — so anything else you added has to be entered
+  again. Copying the recursor's `apizones` file across is not a shortcut: it
+  would carry the old rules for your zones too, pointing at the cluster's
+  address, and the panel never overwrites a rule that points somewhere else.
+
+Run this from a fresh clone, on a machine whose `kubectl` reaches the
+cluster:
+
+```bash
+# 1. The panel's key, so the restored provider secrets stay readable.
+#    generate-secrets.sh keeps an existing file and creates the others.
+mkdir -p secrets && chmod 0700 secrets
+kubectl -n powerdns get secret powerdns-secrets \
+  -o jsonpath='{.data.webui_secret_key}' | base64 -d > secrets/webui_secret_key
+chmod 0644 secrets/webui_secret_key
+./scripts/generate-secrets.sh
+
+# 2. The forward rules the panel does not manage itself, and the global
+#    forwarders. Rules for your own zones are left out: the panel rebuilds them.
+kubectl -n powerdns exec deploy/webui -- python -c '
+from app import create_app
+from app.recursor import client_from_config, local_zone_target
+app = create_app()
+ours = local_zone_target(app.config)
+for z in client_from_config(app.config).forward_zones():
+    if tuple(z.servers) != (ours,):
+        recurse = "yes" if z.recursion_desired else "no"
+        print(f"{z.display_name}: {z.servers_text}  (ask the forwarder to recurse: {recurse})")
+' | tee forward-rules.txt
+
+# 3. The database: zones, records, DNSSEC keys, users, grants, audit log.
+kubectl -n powerdns exec db-0 -- pg_dump -U postgres -d pdns --clean --if-exists > pdns-k8s.sql
+
+# 4. Load it into compose before the panel starts. Wait over TCP: on a fresh
+#    volume the image first runs a temporary server on the Unix socket only,
+#    while the init scripts create the roles and the schema, and a plain
+#    pg_isready already answers "ready" against that one.
+docker compose up -d db
+until docker compose exec -T db pg_isready -h 127.0.0.1 -U postgres -d pdns; do sleep 2; done
+docker compose exec -T db psql -U postgres -d pdns -v ON_ERROR_STOP=1 --single-transaction \
+  < pdns-k8s.sql && docker compose up -d --build
+```
+
+The restore runs as one transaction and stops at the first error, so it
+either loads completely or leaves the fresh database exactly as the init
+scripts made it, and the rest of the stack only starts once it has succeeded.
+If it fails, fix the cause — usually an incomplete `pdns-k8s.sql` from step 3 —
+and run the last command again.
+
+Then open **Forwarding** in the panel. Opening it re-creates the rules for
+your own zones against compose's address. Add each line of
+`forward-rules.txt` back: the zones under **Forward zones**, with the same
+servers and the same *Ask the forwarder to recurse* setting, and the
+**Global forwarders** line in that form.
+
+Sign in with your existing account: the restore brings the cluster's users
+back, so the password `generate-secrets.sh` printed is not used. Check the
+result as in [Checking the result](#checking-the-result), then remove the
+cluster.
+
 ## Rotating secrets
 
 | Secret | How |

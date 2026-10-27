@@ -12,17 +12,20 @@ from their labels. Upgrade instructions live in
 
 ## [Unreleased]
 
-### Documentation
+### Removed
 
-- **Running on a single machine with kind.** The Kubernetes guide has a
-  section for kind — a Raspberry Pi or a home server — where the node is a
-  container and NodePorts never reach the host. A cluster config maps the
-  machine's port 53 (UDP and TCP, on its LAN address rather than `0.0.0.0`,
-  which collides with Podman's aardvark-dns) and 9191 to fixed NodePorts, a small overlay
-  next to the clone pins `recursor-dns` and `webui` to them, and the section
-  covers moving an existing cluster over with a dump and restore, why the
-  recursor's allow-list stops telling clients apart behind the runtime's NAT,
-  and why `kubectl port-forward` can reach the panel but never DNS.
+- **Kubernetes support**, added in 1.3.0. `deploy/kubernetes`,
+  `scripts/k8s-secrets.sh`, the Kubernetes page of the documentation and the
+  CI job that validated the manifests are gone; compose is again the one
+  supported way to run the stack. Nothing changes for a compose deployment.
+  A cluster running the 1.3.0 manifests keeps running, but nothing here
+  maintains them any more. Moving it to compose takes more than the database:
+  the panel's `SECRET_KEY` has to come along, or every sign-in provider secret
+  stored through the web UI becomes unreadable, and the recursor keeps your own
+  forward rules and the global forwarders in its volume rather than in
+  PostgreSQL, so they have to be noted and entered again. The steps are in
+  [Upgrading](https://powerdns.stoifl.app/upgrading#moving-from-the-kubernetes-manifests-to-compose).
+  Since this removes a released feature, the next release is a major version.
 
 ## [1.3.0] — 2026-09-27
 

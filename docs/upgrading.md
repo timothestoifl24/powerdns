@@ -432,12 +432,21 @@ for z in client_from_config(app.config).forward_zones():
 # 3. The database: zones, records, DNSSEC keys, users, grants, audit log.
 kubectl -n powerdns exec db-0 -- pg_dump -U postgres -d pdns --clean --if-exists > pdns-k8s.sql
 
-# 4. Load it into compose before the panel starts.
+# 4. Load it into compose before the panel starts. Wait over TCP: on a fresh
+#    volume the image first runs a temporary server on the Unix socket only,
+#    while the init scripts create the roles and the schema, and a plain
+#    pg_isready already answers "ready" against that one.
 docker compose up -d db
-until docker compose exec -T db pg_isready -U postgres -d pdns; do sleep 2; done
-docker compose exec -T db psql -U postgres -d pdns < pdns-k8s.sql
-docker compose up -d --build
+until docker compose exec -T db pg_isready -h 127.0.0.1 -U postgres -d pdns; do sleep 2; done
+docker compose exec -T db psql -U postgres -d pdns -v ON_ERROR_STOP=1 --single-transaction \
+  < pdns-k8s.sql && docker compose up -d --build
 ```
+
+The restore runs as one transaction and stops at the first error, so it
+either loads completely or leaves the fresh database exactly as the init
+scripts made it, and the rest of the stack only starts once it has succeeded.
+If it fails, fix the cause — usually an incomplete `pdns-k8s.sql` from step 3 —
+and run the last command again.
 
 Then open **Forwarding** in the panel. Opening it re-creates the rules for
 your own zones against compose's address. Add each line of

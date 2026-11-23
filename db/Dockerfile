@@ -8,7 +8,7 @@
 # unqualified name fails the build outright on a host with no
 # unqualified-search-registries in /etc/containers/registries.conf. Docker
 # resolves the long form identically.
-FROM docker.io/library/postgres:18-alpine
+FROM docker.io/library/postgres:19-alpine
 
 # PostgreSQL 18 moved the data directory. The image's PGDATA is now
 # /var/lib/postgresql/18/docker and the declared volume is the parent,
